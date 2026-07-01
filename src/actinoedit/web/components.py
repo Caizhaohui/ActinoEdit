@@ -19,7 +19,7 @@ def create_header() -> None:
 def create_footer() -> None:
     """Create the application footer."""
     with ui.footer().classes("bg-grey-2"):
-        ui.label("ActinoEdit v0.1.0 - Local CRISPR Design Tool").classes("text-caption text-grey-7")
+        ui.label("ActinoEdit v0.2.0 - Local CRISPR Design Tool (with DB)").classes("text-caption text-grey-7")
 
 
 def create_file_inputs(state: WebState) -> None:

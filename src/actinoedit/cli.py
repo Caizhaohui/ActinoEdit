@@ -479,6 +479,54 @@ def db_export(
     console.print(f"[green]Exported to[/green] {path}")
 
 
+@db_app.command("list-genomes")
+def db_list_genomes() -> None:
+    """List imported genomes."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    from actinoedit.db import list_genomes
+    genomes = list_genomes()
+    if not genomes:
+        console.print("No genomes imported yet.")
+        return
+    table = Table(title="Imported Genomes")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("Contigs")
+    table.add_column("Length")
+    table.add_column("GC")
+    for g in genomes:
+        table.add_row(str(g.get("id")), g.get("name",""), str(g.get("contigs","")), str(g.get("total_length","")), f"{g.get('gc',0):.2%}")
+    console.print(table)
+
+
+@db_app.command("list-genes")
+def db_list_genes(genome: str = typer.Option(..., "--genome", "-g", help="Genome name")) -> None:
+    """List genes for an imported genome."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    from actinoedit.db import get_genes_for_genome
+    genes = get_genes_for_genome(genome_name=genome, limit=50)
+    if not genes:
+        console.print(f"No genes for genome '{genome}'.")
+        return
+    table = Table(title=f"Genes for {genome} (first {len(genes)})")
+    table.add_column("locus_tag")
+    table.add_column("gene")
+    table.add_column("contig")
+    table.add_column("start-end")
+    table.add_column("product")
+    for g in genes:
+        table.add_row(
+            g.get("locus_tag") or "",
+            g.get("gene_name") or "",
+            g.get("contig",""),
+            f"{g.get('start')}-{g.get('end')}",
+            (g.get("product") or "")[:40],
+        )
+    console.print(table)
+
+
 # Attach db sub-app
 app.add_typer(db_app, name="db")
 

@@ -12,6 +12,7 @@ from typing import Any
 
 import pandas as pd
 
+from actinoedit.core.models import GeneFeature
 from actinoedit.core.pipeline import DesignResult
 from actinoedit.db.database import get_connection, init_database
 from actinoedit.io.fasta import parse_fasta
@@ -185,7 +186,7 @@ def import_genome(
             else:
                 features = parse_gbk(str(ann_p))
             feature_count = len(features)
-            # Future: could insert individual genes into a genes table
+            save_genes(genome_id, features)
 
     return {
         "genome_id": genome_id,
@@ -231,3 +232,73 @@ def export_project_guides(
         df.to_csv(out_p, index=False)
 
     return str(out_p)
+
+
+def save_genes(genome_id: int, features: list[GeneFeature]) -> int:
+    """Save GeneFeature list into the genes table for a genome."""
+    if not features:
+        return 0
+    conn = ensure_db()
+    cur = conn.cursor()
+    count = 0
+    for f in features:
+        cur.execute(
+            """
+            INSERT INTO genes (genome_id, contig, start, end, strand,
+                               locus_tag, gene_name, product, feature_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                genome_id,
+                f.contig,
+                f.start,
+                f.end,
+                f.strand,
+                f.locus_tag,
+                f.gene_name,
+                f.product,
+                f.feature_type,
+            ),
+        )
+        count += 1
+    conn.commit()
+    return count
+
+
+def get_genes_for_genome(genome_name: str | None = None, genome_id: int | None = None, limit: int = 500) -> list[dict[str, Any]]:
+    """Retrieve genes for a genome."""
+    conn = ensure_db()
+    if genome_id is None and genome_name:
+        row = conn.execute("SELECT id FROM genomes WHERE name = ?", (genome_name,)).fetchone()
+        if not row:
+            return []
+        genome_id = row["id"]
+    if genome_id is None:
+        return []
+    rows = conn.execute(
+        "SELECT * FROM genes WHERE genome_id = ? ORDER BY contig, start LIMIT ?",
+        (genome_id, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_genomes() -> list[dict[str, Any]]:
+    """List all imported genomes."""
+    conn = ensure_db()
+    rows = conn.execute(
+        "SELECT id, name, fasta_path, contigs, total_length, gc, imported_at FROM genomes ORDER BY imported_at DESC"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_project(project_name: str) -> bool:
+    """Delete a project and its guides (cascades not auto, so manual)."""
+    conn = ensure_db()
+    row = conn.execute("SELECT id FROM projects WHERE name = ?", (project_name,)).fetchone()
+    if not row:
+        return False
+    pid = row["id"]
+    conn.execute("DELETE FROM guides WHERE project_id = ?", (pid,))
+    conn.execute("DELETE FROM projects WHERE id = ?", (pid,))
+    conn.commit()
+    return True

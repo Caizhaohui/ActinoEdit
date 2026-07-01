@@ -10,7 +10,7 @@ runner = CliRunner()
 
 def test_version() -> None:
     """Test that version is defined."""
-    assert __version__ == "0.1.0"
+    assert __version__ == "0.2.0"
 
 
 def test_cli_help() -> None:

@@ -10,11 +10,16 @@ Usage (CLI):
 """
 
 from actinoedit.db.crud import (
+    create_project,
+    delete_project,
     export_project_guides,
+    get_genes_for_genome,
     get_project_guides,
     import_genome,
+    list_genomes,
     list_projects,
     list_saved_guides,
+    save_genes,
     save_genome,
     save_guides_from_result,
 )
@@ -30,4 +35,9 @@ __all__ = [
     "list_saved_guides",
     "import_genome",
     "export_project_guides",
+    "list_genomes",
+    "get_genes_for_genome",
+    "save_genes",
+    "delete_project",
+    "create_project",
 ]

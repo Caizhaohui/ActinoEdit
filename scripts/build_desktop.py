@@ -24,8 +24,9 @@ def build() -> None:
         "--noconfirm",
         "--clean",
         "--windowed",  # No console window on Windows
-        # Add NiceGUI data files
+        # Add NiceGUI data files + ActinoEdit resources (examples, profiles)
         "--add-data", f"{nicegui_path}:nicegui",
+        "--add-data", f"{project_root / 'examples'}:examples",
         # Hidden imports
         "--hidden-import", "nicegui",
         "--hidden-import", "uvicorn",

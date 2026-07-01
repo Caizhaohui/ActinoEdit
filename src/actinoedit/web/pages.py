@@ -55,6 +55,21 @@ def create_main_page(state: WebState) -> None:
         create_results_table(state)
         create_download_buttons(state)
 
+        # Quick DB save from design (full Web CRUD)
+        with ui.card().classes("w-full").bind_visibility_from(state, "has_result"):
+            ui.label("Save to Local DB Project").classes("text-h6")
+            proj_name = ui.input("Project name", value="web_design").classes("w-64")
+            def save_now() -> None:
+                res = state.result
+                if res:
+                    from actinoedit.db import save_guides_from_result
+                    try:
+                        n = save_guides_from_result(res, proj_name.value or "web_design")
+                        ui.notify(f"Saved {n} guides to DB project", type="positive")
+                    except Exception as e:
+                        ui.notify(str(e), type="negative")
+            ui.button("Save current guides to DB", on_click=save_now).props("size=sm color=green")
+
     create_footer()
 
 
@@ -171,41 +186,107 @@ def _load_demo(state: WebState) -> None:
 
 
 def create_projects_page(state: WebState) -> None:
-    """Create a simple page to browse projects and saved guides from DB."""
+    """Create full CRUD page for DB projects, genes, and saving designs."""
     create_header()
 
     with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-4"):
-        ui.label("Saved Projects (Local DB)").classes("text-h5 text-primary")
+        ui.label("Projects & Database (Local SQLite)").classes("text-h5 text-primary")
 
         if not _db_available():
-            ui.label("Database module not available or not initialized. Run 'actinoedit db init'.").classes("text-negative")
+            ui.label("DB not available. Run 'actinoedit db init' from CLI first.").classes("text-negative")
             return
 
-        from actinoedit.db import get_project_guides, list_projects
+        from actinoedit.db import (
+            create_project as db_create_project,
+        )
+        from actinoedit.db import (
+            delete_project,
+            get_genes_for_genome,
+            get_project_guides,
+            list_genomes,
+            list_projects,
+            save_guides_from_result,
+        )
 
+        # Create project
+        with ui.card().classes("w-full"):
+            ui.label("Create New Project").classes("text-h6")
+            new_name = ui.input("Project name", placeholder="my_crispr_project").classes("w-full")
+            new_desc = ui.input("Description (optional)").classes("w-full")
+            def do_create() -> None:
+                if not new_name.value:
+                    ui.notify("Name required", type="negative")
+                    return
+                db_create_project(new_name.value, new_desc.value or "", state.profile_name)
+                ui.notify(f"Project '{new_name.value}' created", type="positive")
+                new_name.value = ""
+                # refresh page manually if needed
+            ui.button("Create Project", on_click=do_create).props("color=primary")
+
+        # List projects with CRUD + guides
         projs = list_projects()
-        if not projs:
-            ui.label("No projects found. Use CLI 'actinoedit db save-guides' or design from Web.").classes("text-grey")
-            return
+        if projs:
+            ui.label("Projects").classes("text-h6 mt-4")
+            for p in projs:
+                pname = p.get("name", "")
+                with ui.expansion(f"{pname} (profile: {p.get('organism_profile','')})", icon="folder").classes("w-full"):
+                    # Guides
+                    guides = get_project_guides(pname, limit=20)
+                    if guides:
+                        cols = [{"name": k, "label": k, "field": k} for k in ["guide_id", "contig", "start", "final_score", "recommendation", "bgc_context"]]
+                        rows = [{k: g.get(k, "") for k in ["guide_id", "contig", "start", "final_score", "recommendation", "bgc_context"]} for g in guides]
+                        ui.table(columns=cols, rows=rows, pagination=5).classes("w-full")
+                    else:
+                        ui.label("No saved guides yet.")
 
-        for p in projs:
-            with ui.expansion(f"Project: {p.get('name')} (id={p.get('id')})", icon="folder").classes("w-full"):
-                guides = get_project_guides(p.get("name", ""), limit=30)
-                if guides:
-                    cols = [{"name": k, "label": k, "field": k} for k in ["guide_id", "contig", "start", "final_score", "recommendation", "bgc_context"]]
-                    rows = [{k: g.get(k, "") for k in ["guide_id", "contig", "start", "final_score", "recommendation", "bgc_context"]} for g in guides]
-                    ui.table(columns=cols, rows=rows, pagination=10).classes("w-full")
-                else:
-                    ui.label("No guides saved for this project yet.")
+                    # Actions
+                    with ui.row():
+                        ui.button("Export CSV", on_click=lambda n=pname: _export_project(n)).props("size=sm")
+                        def do_delete(n=pname) -> None:  # type: ignore[no-untyped-def]
+                            if delete_project(n):
+                                ui.notify(f"Deleted {n}", type="warning")
+                                # manual page refresh recommended
+                            else:
+                                ui.notify("Delete failed", type="negative")
+                        ui.button("Delete Project", on_click=do_delete, color="red").props("size=sm outline")
 
-                name_val = p.get("name") or ""
-                ui.button("Export CSV", on_click=lambda n=name_val: _export_project(n)).props("size=sm")
+                    # Save current design if available
+                    if state.result and state.result.guide_candidates:
+                        def do_save(n=pname) -> None:  # type: ignore[no-untyped-def]
+                            res = state.result
+                            if res:
+                                try:
+                                    n_saved = save_guides_from_result(res, n, replace_existing=False)
+                                    ui.notify(f"Saved {n_saved} guides to {n}", type="positive")
+                                except Exception as ex:
+                                    ui.notify(f"Save failed: {ex}", type="negative")
+                        ui.button(f"Save Current Design to '{pname}'", on_click=do_save, color="green").props("size=sm")
+
+        # Genomes & Genes (for import-genome use)
+        genomes = list_genomes()
+        if genomes:
+            ui.label("Imported Genomes & Genes").classes("text-h6 mt-4")
+            for g in genomes[:5]:  # limit
+                gid = g.get("id")
+                with ui.expansion(f"Genome: {g.get('name')} ({g.get('contigs')} contigs)", icon="dna"):
+                    genes = get_genes_for_genome(genome_id=gid, limit=10) if gid else []
+                    if genes:
+                        gcols = [{"name": "locus_tag", "label": "Locus", "field": "locus_tag"},
+                                 {"name": "gene_name", "label": "Gene", "field": "gene_name"},
+                                 {"name": "contig", "label": "Contig", "field": "contig"},
+                                 {"name": "start", "label": "Start", "field": "start"}]
+                        grows = genes
+                        ui.table(columns=gcols, rows=grows, pagination=5)
+                    else:
+                        ui.label("No genes stored (import with annotation).")
 
     create_footer()
 
 
 def _db_available() -> bool:
     try:
+        from actinoedit.db import list_projects
+        list_projects()
         return True
     except Exception:
         return False

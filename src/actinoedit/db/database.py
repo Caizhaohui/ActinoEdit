@@ -98,5 +98,22 @@ def init_database(conn: sqlite3.Connection | None = None) -> sqlite3.Connection:
         )
     """)
 
+    # Genes / features from annotation
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS genes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            genome_id INTEGER,
+            contig TEXT NOT NULL,
+            start INTEGER NOT NULL,
+            end INTEGER NOT NULL,
+            strand TEXT NOT NULL,
+            locus_tag TEXT,
+            gene_name TEXT,
+            product TEXT,
+            feature_type TEXT DEFAULT 'gene',
+            FOREIGN KEY(genome_id) REFERENCES genomes(id)
+        )
+    """)
+
     conn.commit()
     return conn

@@ -1,0 +1,8 @@
+##gff-version 3
+##species Streptomyces coelicolor
+contig1	Prodigal:2.60	CDS	1	300	.	+	0	ID=geneA;locus_tag=SCO0001;gene=geneA;product=Hypothetical protein
+contig1	Prodigal:2.60	CDS	400	800	.	+	0	ID=geneB;locus_tag=SCO0002;gene=geneB;product=Transcriptional regulator
+contig1	Prodigal:2.60	CDS	900	1200	.	-	0	ID=geneC;locus_tag=SCO0003;gene=geneC;product=ABC transporter
+contig1	Prodigal:2.60	CDS	1500	2000	.	+	0	ID=geneD;locus_tag=SCO0004;gene=geneD;product=Polyketide synthase
+contig2	Prodigal:2.60	CDS	100	500	.	+	0	ID=geneE;locus_tag=SCO0005;gene=geneE;product=Replication protein
+contig2	Prodigal:2.60	CDS	600	900	.	-	0	ID=geneF;locus_tag=SCO0006;gene=geneF;product=Conjugation protein

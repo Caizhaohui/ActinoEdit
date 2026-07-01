@@ -1,0 +1,4 @@
+# Demo BGC regions for testing (1-based coordinates, TSV)
+# contig	start	end	bgc_id	bgc_type	product
+contig1	50	280	bgc_demo1	PKS	actinorhodin-like
+contig1	500	900	bgc_demo2	NRPS	non-ribosomal peptide

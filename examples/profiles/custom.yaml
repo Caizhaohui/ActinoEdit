@@ -1,0 +1,11 @@
+name: custom
+display_name: Custom microorganism
+default_pam: NGG
+spacer_length: 20
+max_mismatches: 3
+recommended_gc_min: 30
+recommended_gc_max: 80
+high_gc_warning_threshold: 75
+prefer_cds_first_third_for_knockout: true
+enable_bgc_annotation: false
+offtarget_strictness: medium

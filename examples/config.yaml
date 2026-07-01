@@ -1,0 +1,16 @@
+# ActinoEdit Configuration File
+
+# Default CRISPR parameters
+default_pam: NGG
+default_spacer_length: 20
+default_max_mismatches: 3
+
+# Output settings
+output_format: csv  # csv, excel, html
+
+# Scoring weights
+scoring:
+  specificity_weight: 0.4
+  gc_weight: 0.2
+  position_weight: 0.2
+  homopolymer_weight: 0.2

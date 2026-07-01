@@ -1,0 +1,45 @@
+LOCUS       contig1                 620 bp    DNA     linear   BCT 01-JAN-2024
+DEFINITION  Streptomyces coelicolor A3(2) chromosome, complete sequence.
+ACCESSION   .
+VERSION     .
+KEYWORDS    .
+SOURCE      Streptomyces coelicolor A3(2)
+  ORGANISM  Streptomyces coelicolor A3(2)
+            Bacteria; Actinobacteria; Streptomycetales; Streptomycetaceae;
+            Streptomyces.
+FEATURES             Location/Qualifiers
+     source          1..620
+                     /organism="Streptomyces coelicolor A3(2)"
+                     /mol_type="genomic DNA"
+     CDS             1..300
+                     /locus_tag="SCO0001"
+                     /gene="geneA"
+                     /product="Hypothetical protein"
+                     /transl_table=11
+     CDS             400..800
+                     /locus_tag="SCO0002"
+                     /gene="geneB"
+                     /product="Transcriptional regulator"
+                     /transl_table=11
+     CDS             complement(900..1200)
+                     /locus_tag="SCO0003"
+                     /gene="geneC"
+                     /product="ABC transporter"
+                     /transl_table=11
+     CDS             1500..2000
+                     /locus_tag="SCO0004"
+                     /gene="geneD"
+                     /product="Polyketide synthase"
+                     /transl_table=11
+ORIGIN
+        1 ttgacgtcaa tcgatcgatc gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc
+       61 gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc
+      121 gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc
+      181 gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc
+      241 gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc
+      301 gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc
+      361 gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc gatcgatcga tcgatcgatc
+      421 gcgcgcgcgc gcgcgcgcgc gcgcgcgcgc gcgcgcgcgc gcgcgcgcgc gcgcgcgcgc
+      481 gcgcgcgcgc gcgcgcgcgc gcgcgcgcgc gcgcgcgcgc gcgcgcgcgc gcgcgcgcgc
+      541 atgatgatga tgatgatgat gatgatgatg atgatgatga tgatgatgat gatgatgatg
+//

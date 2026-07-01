@@ -1,0 +1,11 @@
+name: yeast
+display_name: Yeast / small fungal genome
+default_pam: NGG
+spacer_length: 20
+max_mismatches: 3
+recommended_gc_min: 30
+recommended_gc_max: 70
+high_gc_warning_threshold: 65
+prefer_cds_first_third_for_knockout: false
+enable_bgc_annotation: false
+offtarget_strictness: medium

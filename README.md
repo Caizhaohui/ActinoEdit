@@ -11,7 +11,10 @@ ActinoEdit is a Python toolkit and local web application for CRISPR guide RNA de
 - 🧪 High GC content optimization for actinomycetes
 - 🔒 Local-first design for data privacy
 - 📊 CSV, Excel, and HTML report generation
-- 🌐 NiceGUI local web interface (run with `actinoedit-web`)
+- 🌐 NiceGUI local web interface with file uploads and auto-saved reports
+- 🗄️ Local SQLite database (projects, genomes, genes, saved guides)
+- 🖥️ Web DB CRUD: create/delete projects, save designs, browse genes
+- 🛠️ Packaging support for standalone desktop apps
 
 ## Installation
 
@@ -133,13 +136,34 @@ ActinoEdit supports organism-specific design profiles:
 ## Roadmap
 
 - [x] v0.1: CLI MVP
-- [x] v0.2: CLI with off-target search and scoring (pipeline + reports)
+- [x] v0.2.0: Full local DB (genes table + CRUD) + Web DB integration + packaging polish + base editing/CRISPRi/BGC
 - [x] v0.3: Local Web MVP (NiceGUI with full pipeline + uploads)
 - [x] v0.4: One-click / packaged launcher
-- [x] v0.5: BGC annotation (Phase 5 start)
-- [x] v0.6 partial: CRISPRi mode + base editing analysis + DB skeleton (import/export/projects)
-- [ ] v0.7: Full local SQLite project management + Web DB browsing
+- [ ] v0.5+: Advanced actinomycete features, multi-user DB platform
 - [ ] v1.0: Industrial microbe database platform
+
+## Changelog
+
+### v0.2.0 (2026-07-01)
+
+- **Database enhancements**:
+  - Added `genes` table linked to genomes
+  - `import_genome` now persists gene features from GFF/GBK
+  - New CLI: `db list-genomes`, `db list-genes`
+  - `delete_project` support
+- **Web UI full CRUD**:
+  - Projects page now supports create/delete projects
+  - Save current design results directly to DB from Web
+  - Browse imported genomes and genes in UI
+  - "Save to Local DB" button added to design results
+- **Packaging**:
+  - Version bumped to 0.2.0
+  - Builds now include `examples/` directory (profiles + demo data)
+  - Updated PyInstaller spec and build scripts
+- Other: Improved DB integration, CLI help, documentation updates
+
+### Previous
+- v0.1.x: Initial CLI, pipeline, reports, Web skeleton, BGC, CRISPRi, base editing
 
 
 ## License

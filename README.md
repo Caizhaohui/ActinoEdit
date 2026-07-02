@@ -74,12 +74,20 @@ actinoedit db export --project myproj --output myguides.csv
 ### Web Interface
 
 ```bash
-# Start local web application
+# One-click demo (v0.4) — loads Streptomyces example, opens browser
+actinoedit-web --demo
+
+# Or use the launcher script (creates .venv, installs, verifies, then starts UI)
+./scripts/launch_demo.sh        # Linux/macOS
+scripts\launch_demo.bat         # Windows
+
+# Standard web application
 actinoedit-web
 # or
 python -m actinoedit.web.app
 
-# Open browser to http://127.0.0.1:8080 (or use --show to auto-open)
+# Headless v0.4 acceptance (CI / clean machine check)
+python -m actinoedit.web.app --acceptance-check
 ```
 
 ## Development
@@ -91,7 +99,7 @@ python -m actinoedit.web.app
 pip install -e ".[dev]"
 
 # Run tests
-pytest
+python -m pytest
 
 # Run linter
 ruff check .
@@ -133,13 +141,26 @@ ActinoEdit supports organism-specific design profiles:
 | yeast | Yeast / small fungal genomes | NGG | 30-70% |
 | custom | Custom microorganism | NGG | 30-80% |
 
+## Scientific scope (computational screening)
+
+ActinoEdit is a **computational design and annotation tool**. Several modes provide rough annotations for prioritization, not experimental outcomes:
+
+| Mode | What it does | Limitation |
+|------|--------------|------------|
+| **CRISPRi** (`--mode crispri`) | Approximate promoter / start-codon proximity using TSS/start-codon heuristics | Not a full promoter model; distances are for screening only |
+| **Base editing** (`base-edit`) | Screens designed guides for editable bases and predicted codon/AA changes | Uses the top-scoring designed guide; editing window and efficiency are not modeled |
+| **BGC context** | Tags guides overlapping BED/TSV regions | Region overlap only; no pathway or product prediction |
+
+Do not use these outputs as wet-lab protocols or strain-specific operational instructions.
+
 ## Roadmap
 
 - [x] v0.1: CLI MVP
 - [x] v0.2.0: Full local DB (genes table + CRUD) + Web DB integration + packaging polish + base editing/CRISPRi/BGC
 - [x] v0.3: Local Web MVP (NiceGUI with full pipeline + uploads)
-- [x] v0.4: One-click / packaged launcher
-- [ ] v0.5+: Advanced actinomycete features, multi-user DB platform
+- [x] v0.4: One-click demo launcher (`actinoedit-web --demo`, `scripts/launch_demo.*`)
+- [x] CRISPRi output columns (crispri_region_type, distance_to_start_codon, target_strand_relation)
+- [ ] v0.5+: Full Phase 7 PostgreSQL / multi-user intranet platform (config abstraction started)
 - [ ] v1.0: Industrial microbe database platform
 
 ## Changelog

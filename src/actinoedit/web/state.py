@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from actinoedit.core.models import (
     GuideCandidate,
     GuideScore,
 )
 from actinoedit.core.pipeline import DesignResult
+
+TaskStatus = Literal["idle", "running", "completed", "failed", "cancelled", "timeout"]
 
 
 @dataclass
@@ -34,14 +37,24 @@ class WebState:
     # Target
     target: str = ""
 
+    # Design mode
+    design_mode: str = "knockout"  # knockout or crispri
+
     # Optional BGC for actinomycete context
     bgc_path: str = ""
 
     # Design results
     result: DesignResult | None = None
     is_running: bool = False
+    task_status: TaskStatus = "idle"
+    cancel_requested: bool = False
     error_message: str = ""
+    status_message: str = ""
     progress_messages: list[str] = field(default_factory=list)
+
+    # Upload feedback
+    genome_upload_status: str = ""
+    annotation_upload_status: str = ""
 
     # Table filtering
     filter_recommendation: str = "all"
@@ -51,8 +64,18 @@ class WebState:
         """Reset state for a new design run."""
         self.result = None
         self.is_running = False
+        self.task_status = "idle"
+        self.cancel_requested = False
         self.error_message = ""
+        self.status_message = ""
         self.progress_messages = []
+
+    def request_cancel(self) -> None:
+        """Request cancellation of the active background design task."""
+        self.cancel_requested = True
+        if self.is_running:
+            self.task_status = "cancelled"
+            self.status_message = "Cancellation requested..."
 
     def add_progress(self, message: str) -> None:
         """Add a progress message."""
@@ -62,6 +85,21 @@ class WebState:
     def has_result(self) -> bool:
         """Check if a design result is available."""
         return self.result is not None
+
+    @property
+    def has_guides(self) -> bool:
+        """Check if the current result contains guide candidates."""
+        return self.result is not None and bool(self.result.guide_candidates)
+
+    @property
+    def show_task_status(self) -> bool:
+        """Whether the task status panel should be visible."""
+        return self.task_status != "idle"
+
+    @property
+    def show_no_guides_message(self) -> bool:
+        """Whether to show the empty-result guidance panel."""
+        return self.task_status == "completed" and not self.has_guides
 
     @property
     def guide_count(self) -> int:

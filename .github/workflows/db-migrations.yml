@@ -1,0 +1,49 @@
+name: DB Migrations (Alembic + Postgres/SQLite)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    - name: Install deps
+      run: |
+        python -m pip install -e ".[dev]" psycopg2-binary alembic
+    - name: Test SQLite migrations
+      run: |
+        export ACTINOEDIT_DB_URL=sqlite:///./test.db
+        alembic --config alembic.ini upgrade head
+    - name: Test Postgres migrations
+      run: |
+        export ACTINOEDIT_DB_URL=postgresql://test:test@localhost:5432/testdb
+        alembic --config alembic.ini upgrade head
+      env:
+        PGPASSWORD: test
+    - name: Test Postgres E2E (config + connection + DB fields)
+      run: |
+        export ACTINOEDIT_DB_URL=postgresql://test:test@localhost:5432/testdb
+        python -m pytest -q -k "postgres or db" --tb=no
+      env:
+        PGPASSWORD: test

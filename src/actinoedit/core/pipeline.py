@@ -20,6 +20,7 @@ from actinoedit.core.models import (
     TargetRegion,
 )
 from actinoedit.core.offtarget import search_offtargets
+from actinoedit.core.offtarget_index import get_or_build_index
 from actinoedit.core.profiles import get_profile_or_default
 from actinoedit.core.scanner import ScannerConfig, scan_guides
 from actinoedit.core.scoring import ScoringWeights, score_guide
@@ -83,6 +84,7 @@ class DesignResult:
 def run_design_pipeline(
     input_params: DesignInput,
     progress_callback: Callable[[str], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> DesignResult:
     """Run the guide RNA design pipeline.
 
@@ -158,13 +160,21 @@ def run_design_pipeline(
         result.warnings.append("No guide candidates found")
         return result
 
-    # Step 6: Search off-targets
+    # Step 6: Search off-targets (reuse cached k-mer index across guides)
+    _report_progress(progress_callback, "Building genome off-target index...")
+    genome_index = get_or_build_index(contigs)
     _report_progress(progress_callback, "Searching for off-target sites...")
     for i, guide in enumerate(guides):
+        if should_cancel and should_cancel():
+            result.warnings.append("Design cancelled during off-target search")
+            return result
+
         hits = search_offtargets(
-            guide, contigs,
+            guide,
+            contigs,
             max_mismatches=input_params.max_mismatches,
             ignore_on_target=True,
+            genome_index=genome_index,
         )
         result.off_target_hits[guide.guide_id] = hits
 
@@ -214,6 +224,38 @@ def run_design_pipeline(
             warnings.append(f"BGC annotation skipped: {e}")
 
     result.warnings = warnings
+
+    # Step 9 (optional for crispri): annotate CRISPRi-specific columns
+    if input_params.design_mode == "crispri" and result.target_region:
+        tr = result.target_region
+        is_plus = tr.strand == "+"
+        tss = tr.start if is_plus else tr.end  # approximate TSS / start codon
+        gene_len = abs(tr.end - tr.start) or 300
+        early_cds_threshold = gene_len // 3  # first 1/3 of CDS for early_cds
+
+        for guide in result.guide_candidates:
+            pos = guide.cut_site
+            dist = abs(pos - tss)
+            guide.distance_to_start_codon = dist
+
+            if is_plus:
+                if pos < tss:
+                    guide.crispri_region_type = "promoter"
+                elif pos < tss + early_cds_threshold:
+                    guide.crispri_region_type = "early_cds"
+                else:
+                    guide.crispri_region_type = "cds"
+            else:
+                if pos > tss:
+                    guide.crispri_region_type = "promoter"
+                elif pos > tss - early_cds_threshold:
+                    guide.crispri_region_type = "early_cds"
+                else:
+                    guide.crispri_region_type = "cds"
+
+            guide.target_strand_relation = (
+                "non_template" if guide.strand == tr.strand else "template"
+            )
 
     return result
 

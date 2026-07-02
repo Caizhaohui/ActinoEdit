@@ -1,0 +1,5 @@
+# Lab server PostgreSQL config example (Phase 7)
+database:
+  url: postgresql://actinoedit:secret@db.lab.example.com:5432/actinoedit
+  mode: lab
+  pool_size: 5

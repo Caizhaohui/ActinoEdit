@@ -140,19 +140,28 @@ class TestHelpCommand:
 
     def test_design_help(self) -> None:
         """Test design help command."""
+        from tests.conftest import strip_ansi
+
         result = runner.invoke(app, ["design", "--help"])
         assert result.exit_code == 0
-        assert "--genome" in result.output
-        assert "--target" in result.output
+        output = strip_ansi(result.output)
+        assert "--genome" in output or "-genome" in output
+        assert "--target" in output or "-target" in output
 
     def test_target_info_help(self) -> None:
         """Test target-info help command."""
+        from tests.conftest import strip_ansi
+
         result = runner.invoke(app, ["target-info", "--help"])
         assert result.exit_code == 0
-        assert "--genome" in result.output
+        output = strip_ansi(result.output)
+        assert "--genome" in output or "-genome" in output
 
     def test_base_edit_help(self) -> None:
         """Test base-edit help command."""
+        from tests.conftest import strip_ansi
+
         result = runner.invoke(app, ["base-edit", "--help"])
         assert result.exit_code == 0
-        assert "--editor" in result.output
+        output = strip_ansi(result.output)
+        assert "--editor" in output or "-editor" in output

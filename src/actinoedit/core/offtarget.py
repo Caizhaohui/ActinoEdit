@@ -6,7 +6,12 @@ Supports configurable mismatch tolerance and strand searching.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from actinoedit.core.models import Contig, GuideCandidate, OffTargetHit
+
+if TYPE_CHECKING:
+    from actinoedit.core.offtarget_index import GenomeOffTargetIndex
 
 
 def search_offtargets(
@@ -14,6 +19,7 @@ def search_offtargets(
     contigs: dict[str, Contig],
     max_mismatches: int = 3,
     ignore_on_target: bool = True,
+    genome_index: GenomeOffTargetIndex | None = None,
 ) -> list[OffTargetHit]:
     """Search for off-target sites across the genome.
 
@@ -33,6 +39,13 @@ def search_offtargets(
         >>> print(len(hits))
         5
     """
+    if genome_index is not None:
+        return genome_index.search_guide(
+            guide,
+            max_mismatches=max_mismatches,
+            ignore_on_target=ignore_on_target,
+        )
+
     hits: list[OffTargetHit] = []
     spacer = guide.spacer.upper()
     spacer_len = len(spacer)

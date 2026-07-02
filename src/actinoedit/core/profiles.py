@@ -12,8 +12,11 @@ import yaml
 
 from actinoedit.core.models import OrganismProfile
 
-# Default profiles directory
-DEFAULT_PROFILES_DIR = Path(__file__).parent.parent.parent.parent / "examples" / "profiles"
+
+def _default_profiles_dir() -> Path:
+    from actinoedit.resources import get_profiles_dir
+
+    return get_profiles_dir()
 
 # Built-in profile names
 BUILTIN_PROFILES = [
@@ -45,7 +48,7 @@ def load_profile(
         ValueError: If profile data is invalid.
     """
     if profiles_dir is None:
-        profiles_dir = DEFAULT_PROFILES_DIR
+        profiles_dir = _default_profiles_dir()
 
     profile_path = profiles_dir / f"{name}.yaml"
 
@@ -74,7 +77,7 @@ def list_profiles(profiles_dir: Path | None = None) -> list[str]:
         List of profile names.
     """
     if profiles_dir is None:
-        profiles_dir = DEFAULT_PROFILES_DIR
+        profiles_dir = _default_profiles_dir()
 
     if not profiles_dir.exists():
         return []
@@ -146,7 +149,7 @@ def save_profile(
         Path to saved profile file.
     """
     if profiles_dir is None:
-        profiles_dir = DEFAULT_PROFILES_DIR
+        profiles_dir = _default_profiles_dir()
 
     profiles_dir.mkdir(parents=True, exist_ok=True)
     profile_path = profiles_dir / f"{profile.name}.yaml"

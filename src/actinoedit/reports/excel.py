@@ -60,3 +60,17 @@ def write_excel_report(
         if warnings:
             warnings_df = pd.DataFrame(warnings, columns=["Warning"])
             warnings_df.to_excel(writer, sheet_name="warnings", index=False)
+
+        # Sheet 5: CRISPRi details (if applicable)
+        crispri_guides = [g for g in guides if g.crispri_region_type]
+        if crispri_guides:
+            crispri_data = []
+            for g in crispri_guides:
+                crispri_data.append({
+                    "guide_id": g.guide_id,
+                    "crispri_region_type": g.crispri_region_type,
+                    "distance_to_start_codon": g.distance_to_start_codon,
+                    "target_strand_relation": g.target_strand_relation,
+                })
+            crispri_df = pd.DataFrame(crispri_data)
+            crispri_df.to_excel(writer, sheet_name="crispri_details", index=False)

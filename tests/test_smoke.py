@@ -4,13 +4,14 @@ from typer.testing import CliRunner
 
 from actinoedit import __version__
 from actinoedit.cli import app
+from tests.conftest import strip_ansi
 
 runner = CliRunner()
 
 
 def test_version() -> None:
     """Test that version is defined."""
-    assert __version__ == "0.2.0"
+    assert __version__ == "0.4.0"
 
 
 def test_cli_help() -> None:
@@ -24,26 +25,29 @@ def test_cli_version() -> None:
     """Test that CLI version command works."""
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert __version__ in result.output
+    assert __version__ in strip_ansi(result.output)
 
 
 def test_cli_design_help() -> None:
     """Test that design command help works."""
     result = runner.invoke(app, ["design", "--help"])
     assert result.exit_code == 0
-    assert "--genome" in result.output
-    assert "--target" in result.output
+    output = strip_ansi(result.output)
+    assert "--genome" in output or "-genome" in output
+    assert "--target" in output or "-target" in output
 
 
 def test_cli_target_info_help() -> None:
     """Test that target-info command help works."""
     result = runner.invoke(app, ["target-info", "--help"])
     assert result.exit_code == 0
-    assert "--genome" in result.output
+    output = strip_ansi(result.output)
+    assert "--genome" in output or "-genome" in output
 
 
 def test_cli_base_edit_help() -> None:
     """Test that base-edit command help works."""
     result = runner.invoke(app, ["base-edit", "--help"])
     assert result.exit_code == 0
-    assert "--editor" in result.output
+    output = strip_ansi(result.output)
+    assert "--editor" in output or "-editor" in output

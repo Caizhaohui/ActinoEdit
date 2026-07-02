@@ -13,13 +13,15 @@ def create_header() -> None:
         ui.label("ActinoEdit").classes("text-h4 text-white font-bold")
         ui.label("CRISPR Design Toolkit for Actinomycetes").classes("text-subtitle2 text-blue-200 ml-4")
         ui.link("Projects (DB)", "/projects").classes("text-white ml-auto mr-4")
+        ui.link("Organisms", "/organisms").classes("text-white")
+        ui.link("Genomes", "/genomes").classes("text-white")
         ui.link("Design", "/").classes("text-white")
 
 
 def create_footer() -> None:
     """Create the application footer."""
     with ui.footer().classes("bg-grey-2"):
-        ui.label("ActinoEdit v0.2.0 - Local CRISPR Design Tool (with DB)").classes("text-caption text-grey-7")
+        ui.label("ActinoEdit v0.4.0 - Local CRISPR Design Tool (with DB)").classes("text-caption text-grey-7")
 
 
 def create_file_inputs(state: WebState) -> None:
@@ -32,29 +34,41 @@ def create_file_inputs(state: WebState) -> None:
         ui.label("Input Files").classes("text-h6")
 
         def handle_genome_upload(e):  # type: ignore[no-untyped-def]
-            # NiceGUI upload event
             import os
             import shutil
             import tempfile
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".fasta") as tmp:
-                shutil.copyfileobj(e.content, tmp)
-                state.genome_path = tmp.name
-            ui.notify(f"Uploaded genome: {os.path.basename(state.genome_path)}")
+
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".fasta") as tmp:
+                    shutil.copyfileobj(e.content, tmp)
+                    state.genome_path = tmp.name
+                state.genome_upload_status = f"Uploaded: {os.path.basename(state.genome_path)}"
+                ui.notify(state.genome_upload_status, type="positive")
+            except Exception as exc:
+                state.genome_upload_status = f"Genome upload failed: {exc}"
+                ui.notify(state.genome_upload_status, type="negative")
 
         def handle_ann_upload(e):  # type: ignore[no-untyped-def]
             import os
             import shutil
             import tempfile
+
             suffix = ".gff" if state.annotation_format == "gff" else ".gbk"
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                shutil.copyfileobj(e.content, tmp)
-                state.annotation_path = tmp.name
-            ui.notify(f"Uploaded annotation: {os.path.basename(state.annotation_path)}")
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    shutil.copyfileobj(e.content, tmp)
+                    state.annotation_path = tmp.name
+                state.annotation_upload_status = f"Uploaded: {os.path.basename(state.annotation_path)}"
+                ui.notify(state.annotation_upload_status, type="positive")
+            except Exception as exc:
+                state.annotation_upload_status = f"Annotation upload failed: {exc}"
+                ui.notify(state.annotation_upload_status, type="negative")
 
         with ui.row().classes("w-full gap-4"):
             with ui.column().classes("flex-1"):
                 ui.upload(label="Upload Genome FASTA", on_upload=handle_genome_upload, auto_upload=True).classes("w-full")
                 ui.input("or path", value=state.genome_path).bind_value(state, "genome_path").classes("w-full")
+                ui.label().bind_text_from(state, "genome_upload_status").classes("text-caption text-grey-7")
 
             ui.select(
                 ["gff", "gbk"],
@@ -65,6 +79,7 @@ def create_file_inputs(state: WebState) -> None:
         with ui.column().classes("w-full"):
             ui.upload(label="Upload Annotation", on_upload=handle_ann_upload, auto_upload=True).classes("w-full")
             ui.input("or path", value=state.annotation_path).bind_value(state, "annotation_path").classes("w-full")
+            ui.label().bind_text_from(state, "annotation_upload_status").classes("text-caption text-grey-7")
 
 
 def create_profile_selector(state: WebState, profiles: list[str]) -> None:
@@ -91,6 +106,8 @@ def create_crispr_params(state: WebState) -> None:
     """
     with ui.card().classes("w-full"):
         ui.label("CRISPR Parameters").classes("text-h6")
+
+        ui.select(["knockout", "crispri"], label="Design Mode (crispri for repression)", value=state.design_mode).bind_value(state, "design_mode")
 
         with ui.row().classes("w-full gap-4"):
             ui.input(
@@ -139,6 +156,25 @@ def create_target_input(state: WebState) -> None:
         ).classes("w-full").bind_value(state, "bgc_path")
 
 
+def create_db_status_banner() -> None:
+    """Show a banner when the local database is unavailable."""
+    from actinoedit.web import db_service
+
+    if db_service.is_db_available():
+        return
+    with ui.card().classes("w-full bg-orange-1"):
+        ui.label("Local database unavailable").classes("text-subtitle1 text-negative")
+        ui.label(db_service.db_unavailable_message()).classes("text-caption")
+
+
+def create_task_status_panel(state: WebState) -> None:
+    """Show background task status (running, cancelled, timeout)."""
+    with ui.card().classes("w-full").bind_visibility_from(state, "show_task_status"):
+        ui.label("Task Status").classes("text-h6")
+        ui.label().bind_text_from(state, "status_message").classes("text-body2")
+        ui.spinner(size="lg").bind_visibility_from(state, "is_running")
+
+
 def create_progress_panel(state: WebState) -> None:
     """Create progress display panel.
 
@@ -150,6 +186,15 @@ def create_progress_panel(state: WebState) -> None:
         log_area = ui.log(max_lines=20).classes("w-full h-48")
         for msg in state.progress_messages:
             log_area.push(msg)
+
+
+def create_empty_result_panel(state: WebState) -> None:
+    """Show guidance when a completed run produced no guides."""
+    with ui.card().classes("w-full bg-orange-1").bind_visibility_from(state, "show_no_guides_message"):
+        ui.label("No guide candidates found").classes("text-subtitle1 text-warning")
+        ui.label(
+            "Check target name, annotation coverage, PAM pattern, and design mode.",
+        ).classes("text-caption")
 
 
 def create_error_display(state: WebState) -> None:
@@ -183,6 +228,9 @@ def create_summary_panel(state: WebState) -> None:
             with ui.expansion("Warnings", icon="warning").classes("w-full"):
                 for w in state.result.warnings:
                     ui.label(w).classes("text-warning")
+
+        if state.design_mode == "crispri" and state.result:
+            ui.chip("CRISPRi mode: columns for promoter/early CDS shown in table", color="info")
 
 
 def create_results_table(state: WebState) -> None:
@@ -218,9 +266,17 @@ def create_results_table(state: WebState) -> None:
             {"name": "pam", "label": "PAM", "field": "pam", "sortable": True},
             {"name": "gc", "label": "GC%", "field": "gc", "sortable": True},
             {"name": "off_targets", "label": "Off-targets", "field": "off_targets", "sortable": True},
+        ]
+        if state.design_mode == "crispri":
+            columns.extend([
+                {"name": "crispri_region", "label": "CRISPRi Region", "field": "crispri_region", "sortable": True},
+                {"name": "dist_start", "label": "Dist to Start", "field": "dist_start", "sortable": True},
+                {"name": "strand_rel", "label": "Strand Rel.", "field": "strand_rel", "sortable": True},
+            ])
+        columns.extend([
             {"name": "score", "label": "Score", "field": "score", "sortable": True},
             {"name": "recommendation", "label": "Recommendation", "field": "recommendation", "sortable": True},
-        ]
+        ])
 
         rows = []
         for guide, score, ot_count in state.filtered_guides:
@@ -233,6 +289,9 @@ def create_results_table(state: WebState) -> None:
                 "pam": guide.pam,
                 "gc": f"{guide.gc_content:.1%}",
                 "off_targets": ot_count,
+                "crispri_region": guide.crispri_region_type or "",
+                "dist_start": str(guide.distance_to_start_codon) if guide.distance_to_start_codon is not None else "",
+                "strand_rel": guide.target_strand_relation or "",
                 "score": f"{score.final_score:.3f}" if score else "N/A",
                 "recommendation": score.recommendation if score else "N/A",
             })

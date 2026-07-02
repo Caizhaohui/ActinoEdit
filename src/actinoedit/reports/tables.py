@@ -72,6 +72,11 @@ def guides_to_dataframe(
         row["bgc_type"] = guide.bgc_type or ""
         row["bgc_context"] = guide.bgc_context or ""
 
+        # CRISPRi specific (if mode=crispri)
+        row["crispri_region_type"] = guide.crispri_region_type or ""
+        row["distance_to_start_codon"] = guide.distance_to_start_codon or ""
+        row["target_strand_relation"] = guide.target_strand_relation or ""
+
         rows.append(row)
 
     return pd.DataFrame(rows)

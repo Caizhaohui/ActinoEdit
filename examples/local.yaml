@@ -1,0 +1,4 @@
+# Local SQLite config for ActinoEdit
+database:
+  url: sqlite:////home/user/.actinoedit/actinoedit.db
+  mode: local

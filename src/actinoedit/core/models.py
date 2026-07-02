@@ -356,6 +356,9 @@ class GuideCandidate:
         bgc_id: BGC the guide is in (if annotated).
         bgc_type: Type of the BGC.
         bgc_context: Human readable context e.g. 'inside:NRPS' or 'nearest:PKS (+3.2kb)'.
+        crispri_region_type: For crispri mode, e.g. "promoter", "near_start", "early_cds".
+        distance_to_start_codon: Distance in bp to start codon (for crispri).
+        target_strand_relation: "template", "non_template" or "same"/"opposite" relative to target.
     """
 
     guide_id: str
@@ -373,6 +376,9 @@ class GuideCandidate:
     bgc_id: str | None = None
     bgc_type: str | None = None
     bgc_context: str | None = None
+    crispri_region_type: str | None = None  # e.g. "promoter", "near_start", "early_cds"
+    distance_to_start_codon: int | None = None  # bp distance
+    target_strand_relation: str | None = None  # "template" or "non_template" or "same" / "opposite"
 
     def __post_init__(self) -> None:
         """Validate and calculate derived fields."""

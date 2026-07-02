@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import traceback
+from typing import Any
 
 from nicegui import ui
 
+from actinoedit.web import db_service
 from actinoedit.web.components import (
     create_crispr_params,
+    create_db_status_banner,
     create_download_buttons,
+    create_empty_result_panel,
     create_error_display,
     create_file_inputs,
     create_footer,
@@ -18,8 +22,13 @@ from actinoedit.web.components import (
     create_results_table,
     create_summary_panel,
     create_target_input,
+    create_task_status_panel,
 )
-from actinoedit.web.runner import get_profile_names, run_design
+from actinoedit.web.runner import (
+    cancel_design,
+    get_profile_names,
+    run_design_background,
+)
 from actinoedit.web.state import WebState
 
 
@@ -35,22 +44,31 @@ def create_main_page(state: WebState) -> None:
         ui.label("CRISPR Guide RNA Design").classes("text-h5 text-primary")
         ui.label("Design sgRNAs for actinomycetes and industrial microbes").classes("text-subtitle1 text-grey-7")
 
+        create_db_status_banner()
+
         # Input section
         create_file_inputs(state)
         create_profile_selector(state, get_profile_names())
         create_crispr_params(state)
         create_target_input(state)
 
-        # Run button
-        ui.button(
-            "Run Design",
-            icon="play_arrow",
-            on_click=lambda: _run_design_handler(state),
-        ).props("color=primary size-lg").classes("w-full")
+        with ui.row().classes("w-full gap-2"):
+            ui.button(
+                "Run Design",
+                icon="play_arrow",
+                on_click=lambda: _run_design_handler(state),
+            ).props("color=primary size-lg").classes("flex-1")
+            ui.button(
+                "Cancel",
+                icon="stop",
+                on_click=lambda: cancel_design(state),
+            ).props("color=negative outline").bind_enabled_from(state, "is_running")
 
         # Output section
         create_error_display(state)
+        create_task_status_panel(state)
         create_progress_panel(state)
+        create_empty_result_panel(state)
         create_summary_panel(state)
         create_results_table(state)
         create_download_buttons(state)
@@ -62,9 +80,8 @@ def create_main_page(state: WebState) -> None:
             def save_now() -> None:
                 res = state.result
                 if res:
-                    from actinoedit.db import save_guides_from_result
                     try:
-                        n = save_guides_from_result(res, proj_name.value or "web_design")
+                        n = db_service.save_design_to_project(res, proj_name.value or "web_design")
                         ui.notify(f"Saved {n} guides to DB project", type="positive")
                     except Exception as e:
                         ui.notify(str(e), type="negative")
@@ -74,23 +91,21 @@ def create_main_page(state: WebState) -> None:
 
 
 def _run_design_handler(state: WebState) -> None:
-    """Handle design run button click.
+    """Handle design run button click (background thread with cancel/timeout)."""
 
-    Args:
-        state: Application state.
-    """
-    state.reset()
-    state.is_running = True
+    def _on_complete(result: Any, error: str | None) -> None:
+        if error:
+            ui.notify(error, type="negative")
+            return
+        if result is None:
+            ui.notify(state.status_message or "Design did not complete", type="warning")
+            return
 
-    try:
-        result = run_design(state)
-        state.result = result
-
-        # Auto-save reports locally for convenience
         try:
             from pathlib import Path
 
             from actinoedit.reports import write_design_reports
+
             auto_dir = Path("results") / "web_autosave"
             auto_prefix = str(auto_dir / "last_design")
             write_design_reports(
@@ -108,34 +123,49 @@ def _run_design_handler(state: WebState) -> None:
 
         if result.warnings:
             ui.notify(f"Design complete with {len(result.warnings)} warnings", type="warning")
+        elif result.guide_candidates:
+            ui.notify(
+                f"Design complete: {len(result.guide_candidates)} guides found",
+                type="positive",
+            )
         else:
-            ui.notify(f"Design complete: {len(result.guide_candidates)} guides found", type="positive")
+            ui.notify("Design finished with no guide candidates", type="warning")
 
-    except FileNotFoundError as e:
-        state.error_message = str(e)
-        ui.notify(str(e), type="negative")
-    except ValueError as e:
-        state.error_message = str(e)
-        ui.notify(str(e), type="negative")
+    try:
+        run_design_background(state, on_complete=_on_complete)
+        ui.notify("Design started", type="info")
     except Exception as e:
         state.error_message = f"Unexpected error: {e}"
+        state.task_status = "failed"
         traceback.print_exc()
         ui.notify(f"Error: {e}", type="negative")
-    finally:
-        state.is_running = False
 
 
-def create_demo_page(state: WebState) -> None:
+def create_demo_page(
+    state: WebState,
+    *,
+    demo_banner: bool = False,
+    auto_run: bool = False,
+) -> None:
     """Create demo page with pre-filled example data.
 
     Args:
         state: Application state.
+        demo_banner: Show one-click demo banner (``actinoedit-web --demo``).
+        auto_run: Automatically run design when the page loads.
     """
     create_header()
 
     with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-4"):
         ui.label("Demo Mode").classes("text-h5 text-primary")
         ui.label("Try ActinoEdit with example Streptomyces data").classes("text-subtitle1 text-grey-7")
+
+        if demo_banner:
+            ui.chip(
+                "One-click demo: Streptomyces example loaded — click Run Design or wait for auto-run",
+                icon="rocket_launch",
+                color="positive",
+            ).classes("w-full")
 
         ui.button(
             "Load Demo Data",
@@ -161,6 +191,9 @@ def create_demo_page(state: WebState) -> None:
         create_results_table(state)
         create_download_buttons(state)
 
+        if auto_run:
+            ui.timer(0.5, lambda: _run_design_handler(state), once=True)
+
     create_footer()
 
 
@@ -170,18 +203,9 @@ def _load_demo(state: WebState) -> None:
     Args:
         state: Application state.
     """
-    from pathlib import Path
+    from actinoedit.web.demo import load_demo_state
 
-    examples_dir = Path(__file__).parent.parent.parent.parent / "examples"
-    state.genome_path = str(examples_dir / "demo_genome.fasta")
-    state.annotation_path = str(examples_dir / "demo_annotation.gff")
-    state.annotation_format = "gff"
-    state.profile_name = "streptomyces"
-    state.pam = "NGG"
-    state.spacer_length = 20
-    state.max_mismatches = 3
-    state.target = "geneA"
-
+    load_demo_state(state)
     ui.notify("Demo data loaded", type="info")
 
 
@@ -192,113 +216,436 @@ def create_projects_page(state: WebState) -> None:
     with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-4"):
         ui.label("Projects & Database (Local SQLite)").classes("text-h5 text-primary")
 
-        if not _db_available():
-            ui.label("DB not available. Run 'actinoedit db init' from CLI first.").classes("text-negative")
+        if not db_service.is_db_available():
+            ui.label(db_service.db_unavailable_message()).classes("text-negative")
             return
 
-        from actinoedit.db import (
-            create_project as db_create_project,
-        )
-        from actinoedit.db import (
-            delete_project,
-            get_genes_for_genome,
-            get_project_guides,
-            list_genomes,
-            list_projects,
-            save_guides_from_result,
-        )
-
-        # Create project
-        with ui.card().classes("w-full"):
-            ui.label("Create New Project").classes("text-h6")
-            new_name = ui.input("Project name", placeholder="my_crispr_project").classes("w-full")
-            new_desc = ui.input("Description (optional)").classes("w-full")
-            def do_create() -> None:
-                if not new_name.value:
-                    ui.notify("Name required", type="negative")
-                    return
-                db_create_project(new_name.value, new_desc.value or "", state.profile_name)
-                ui.notify(f"Project '{new_name.value}' created", type="positive")
-                new_name.value = ""
-                # refresh page manually if needed
-            ui.button("Create Project", on_click=do_create).props("color=primary")
-
-        # List projects with CRUD + guides
-        projs = list_projects()
-        if projs:
-            ui.label("Projects").classes("text-h6 mt-4")
-            for p in projs:
-                pname = p.get("name", "")
-                with ui.expansion(f"{pname} (profile: {p.get('organism_profile','')})", icon="folder").classes("w-full"):
-                    # Guides
-                    guides = get_project_guides(pname, limit=20)
-                    if guides:
-                        cols = [{"name": k, "label": k, "field": k} for k in ["guide_id", "contig", "start", "final_score", "recommendation", "bgc_context"]]
-                        rows = [{k: g.get(k, "") for k in ["guide_id", "contig", "start", "final_score", "recommendation", "bgc_context"]} for g in guides]
-                        ui.table(columns=cols, rows=rows, pagination=5).classes("w-full")
-                    else:
-                        ui.label("No saved guides yet.")
-
-                    # Actions
-                    with ui.row():
-                        ui.button("Export CSV", on_click=lambda n=pname: _export_project(n)).props("size=sm")
-                        def do_delete(n=pname) -> None:  # type: ignore[no-untyped-def]
-                            if delete_project(n):
-                                ui.notify(f"Deleted {n}", type="warning")
-                                # manual page refresh recommended
-                            else:
-                                ui.notify("Delete failed", type="negative")
-                        ui.button("Delete Project", on_click=do_delete, color="red").props("size=sm outline")
-
-                    # Save current design if available
-                    if state.result and state.result.guide_candidates:
-                        def do_save(n=pname) -> None:  # type: ignore[no-untyped-def]
-                            res = state.result
-                            if res:
-                                try:
-                                    n_saved = save_guides_from_result(res, n, replace_existing=False)
-                                    ui.notify(f"Saved {n_saved} guides to {n}", type="positive")
-                                except Exception as ex:
-                                    ui.notify(f"Save failed: {ex}", type="negative")
-                        ui.button(f"Save Current Design to '{pname}'", on_click=do_save, color="green").props("size=sm")
-
-        # Genomes & Genes (for import-genome use)
-        genomes = list_genomes()
-        if genomes:
-            ui.label("Imported Genomes & Genes").classes("text-h6 mt-4")
-            for g in genomes[:5]:  # limit
-                gid = g.get("id")
-                with ui.expansion(f"Genome: {g.get('name')} ({g.get('contigs')} contigs)", icon="dna"):
-                    genes = get_genes_for_genome(genome_id=gid, limit=10) if gid else []
-                    if genes:
-                        gcols = [{"name": "locus_tag", "label": "Locus", "field": "locus_tag"},
-                                 {"name": "gene_name", "label": "Gene", "field": "gene_name"},
-                                 {"name": "contig", "label": "Contig", "field": "contig"},
-                                 {"name": "start", "label": "Start", "field": "start"}]
-                        grows = genes
-                        ui.table(columns=gcols, rows=grows, pagination=5)
-                    else:
-                        ui.label("No genes stored (import with annotation).")
+        _render_project_create_card(state)
+        _render_project_export_card()
+        _render_projects_list(state)
+        _render_organisms_preview()
+        _render_genomes_preview()
 
     create_footer()
 
 
-def _db_available() -> bool:
-    try:
-        from actinoedit.db import list_projects
-        list_projects()
-        return True
-    except Exception:
-        return False
+def _render_project_create_card(state: WebState) -> None:
+    with ui.card().classes("w-full"):
+        ui.label("Create New Project").classes("text-h6")
+        new_name = ui.input("Project name", placeholder="my_crispr_project").classes("w-full")
+        new_desc = ui.input("Description (optional)").classes("w-full")
+        org_options = [""] + db_service.organism_name_options()
+        genome_options = [""] + db_service.genome_name_options()
+        link_org = ui.select(org_options, label="Link organism (optional)", value="").classes("w-full")
+        link_genome = ui.select(genome_options, label="Link genome (optional)", value="").classes("w-full")
+
+        def do_create() -> None:
+            if not new_name.value:
+                ui.notify("Name required", type="negative")
+                return
+            try:
+                db_service.create_project_record(
+                    new_name.value,
+                    new_desc.value or "",
+                    state.profile_name,
+                    organism_name=link_org.value or None,
+                    genome_name=link_genome.value or None,
+                )
+                ui.notify(f"Project '{new_name.value}' created", type="positive")
+                new_name.value = ""
+            except Exception as exc:
+                ui.notify(str(exc), type="negative")
+
+        ui.button("Create Project", on_click=do_create).props("color=primary")
+
+
+def _render_project_export_card() -> None:
+    with ui.card().classes("w-full"):
+        ui.label("Export DB Reports").classes("text-h6")
+        exp_proj = ui.input("Project to export guides").classes("w-full")
+
+        def do_export_db() -> None:
+            if not exp_proj.value:
+                return
+            out = db_service.default_project_export_path(
+                exp_proj.value,
+                subdir="",
+                suffix="_db",
+            )
+            try:
+                db_service.export_guides_csv(exp_proj.value, out)
+                ui.notify(f"Exported to {out}")
+            except Exception as e:
+                ui.notify(str(e), type="negative")
+
+        ui.button("Export Project Guides", on_click=do_export_db)
+
+
+def _render_projects_list(state: WebState) -> None:
+    projs = db_service.list_projects_summary()
+    psearch = ui.input("Search projects", value="").classes("w-full")
+    pfiltered = db_service.filter_projects(projs, psearch.value)
+    if not pfiltered:
+        return
+
+    ui.label("Projects").classes("text-h6 mt-4")
+    for p in pfiltered:
+        pname = p.get("name", "")
+        org_label = p.get("organism_name") or "—"
+        genome_label = p.get("genome_name") or "—"
+        guide_count = p.get("guide_count", 0)
+        with ui.expansion(
+            f"{pname} · {guide_count} guides · org: {org_label} · genome: {genome_label}",
+            icon="folder",
+        ).classes("w-full"):
+            ui.label(
+                f"Profile: {p.get('organism_profile', '') or '—'} · "
+                f"Organism: {org_label} · Genome: {genome_label}",
+            ).classes("text-caption text-grey-7")
+            guides = db_service.get_project_guides_summary(pname, limit=20)
+            if guides:
+                cols = [
+                    {"name": col, "label": col, "field": col}
+                    for col in db_service.GUIDE_TABLE_COLUMNS
+                ]
+                ui.table(
+                    columns=cols,
+                    rows=db_service.guides_to_table_rows(guides),
+                    pagination=5,
+                ).classes("w-full")
+            else:
+                ui.label("No saved guides yet.")
+
+            org_options = [""] + db_service.organism_name_options()
+            genome_options = [""] + db_service.genome_name_options()
+            with ui.row().classes("w-full gap-2 items-end"):
+                rel_org = ui.select(
+                    org_options,
+                    label="Organism",
+                    value=p.get("organism_name") or "",
+                ).classes("flex-1")
+                rel_genome = ui.select(
+                    genome_options,
+                    label="Genome",
+                    value=p.get("genome_name") or "",
+                ).classes("flex-1")
+
+                def do_link(
+                    n: str = pname,
+                    org_select: Any = rel_org,
+                    genome_select: Any = rel_genome,
+                ) -> None:
+                    try:
+                        db_service.update_project_links(
+                            n,
+                            organism_name=org_select.value or "",
+                            genome_name=genome_select.value or "",
+                        )
+                        ui.notify(f"Updated links for {n}", type="positive")
+                    except Exception as exc:
+                        ui.notify(str(exc), type="negative")
+
+                ui.button("Update Links", on_click=do_link).props("size=sm")
+
+            with ui.row():
+                ui.button("Export CSV", on_click=lambda n=pname: _export_project(n)).props("size=sm")
+
+                def do_delete(n: str = pname) -> None:
+                    if db_service.delete_project_record(n):
+                        ui.notify(f"Deleted {n}", type="warning")
+                    else:
+                        ui.notify("Delete failed", type="negative")
+
+                ui.button("Delete Project", on_click=do_delete, color="red").props("size=sm outline")
+
+            if state.result and state.result.guide_candidates:
+
+                def do_save(n: str = pname) -> None:
+                    res = state.result
+                    if not res:
+                        return
+                    try:
+                        n_saved = db_service.save_design_to_project(res, n, replace_existing=False)
+                        ui.notify(f"Saved {n_saved} guides to {n}", type="positive")
+                    except Exception as ex:
+                        ui.notify(f"Save failed: {ex}", type="negative")
+
+                ui.button(
+                    f"Save Current Design to '{pname}'",
+                    on_click=do_save,
+                    color="green",
+                ).props("size=sm")
+
+
+def _render_organisms_preview() -> None:
+    orgs = db_service.list_organisms_summary()
+    if not orgs:
+        return
+    ui.label("Organisms").classes("text-h6 mt-4")
+    ocols = [
+        {"name": col, "label": col.title(), "field": col}
+        for col in ("name", "species", "strain")
+    ]
+    orows = db_service.organisms_to_table_rows(orgs[:10])
+    ui.table(columns=ocols, rows=orows, pagination=5).classes("w-full")
+
+
+def _render_genomes_preview() -> None:
+    genomes = db_service.list_genomes_summary()
+    if not genomes:
+        return
+    ui.label("Imported Genomes & Genes").classes("text-h6 mt-4")
+    for g in genomes[:5]:
+        gid = g.get("id")
+        with ui.expansion(f"Genome: {g.get('name')} ({g.get('contigs')} contigs)", icon="dna"):
+            genes = db_service.get_genome_genes(gid, limit=10) if gid else []
+            if genes:
+                gcols = [
+                    {"name": col, "label": col.replace("_", " ").title(), "field": col}
+                    for col in db_service.GENE_TABLE_COLUMNS
+                ]
+                ui.table(columns=gcols, rows=genes, pagination=5)
+            else:
+                ui.label("No genes stored (import with annotation).")
 
 
 def _export_project(project_name: str) -> None:
-    from pathlib import Path
-
-    from actinoedit.db import export_project_guides
     try:
-        out = Path("results") / "db_exports" / f"{project_name}_guides.csv"
-        export_project_guides(project_name, str(out))
+        out = db_service.default_project_export_path(project_name)
+        db_service.export_guides_csv(project_name, out)
         ui.notify(f"Exported to {out}", type="positive")
     except Exception as e:
         ui.notify(f"Export failed: {e}", type="negative")
+
+
+def create_organisms_page(state: WebState) -> None:
+    """Standalone page for browsing/creating organisms."""
+    create_header()
+    with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-4"):
+        ui.label("Organisms").classes("text-h5 text-primary")
+
+        if not db_service.is_db_available():
+            ui.label(db_service.db_unavailable_message()).classes("text-negative")
+            return
+
+        with ui.card().classes("w-full"):
+            ui.label("Add Organism").classes("text-h6")
+            o_name = ui.input("Name").classes("w-full")
+            o_species = ui.input("Species").classes("w-full")
+            o_strain = ui.input("Strain").classes("w-full")
+
+            def do_add() -> None:
+                if o_name.value:
+                    db_service.add_organism(o_name.value, o_species.value, o_strain.value)
+                    ui.notify("Organism added")
+
+            ui.button("Add", on_click=do_add)
+
+        with ui.card().classes("w-full"):
+            ui.label("Delete Organism").classes("text-h6")
+            del_name = ui.input("Name to delete").classes("w-full")
+
+            def do_del() -> None:
+                if del_name.value:
+                    if db_service.remove_organism(del_name.value):
+                        ui.notify(f"Deleted {del_name.value}")
+                    else:
+                        ui.notify("Not found or delete failed")
+
+            ui.button("Delete", on_click=do_del, color="negative")
+
+        with ui.card().classes("w-full"):
+            ui.label("Update Organism").classes("text-h6")
+            up_name = ui.input("Name").classes("w-full")
+            up_species = ui.input("New Species").classes("w-full")
+            up_strain = ui.input("New Strain").classes("w-full")
+
+            def do_up() -> None:
+                if up_name.value:
+                    if db_service.patch_organism(
+                        up_name.value,
+                        up_species.value or None,
+                        up_strain.value or None,
+                    ):
+                        ui.notify(f"Updated {up_name.value}")
+                    else:
+                        ui.notify("Not found")
+
+            ui.button("Update", on_click=do_up)
+
+        orgs = db_service.list_organisms_summary()
+        search_term = ui.input(
+            "Search organisms (name/species/strain)",
+            value="",
+        ).classes("w-full")
+        filtered = db_service.filter_organisms(orgs, search_term.value)
+        table = ui.table(
+            columns=[
+                {"name": col, "label": col, "field": col}
+                for col in db_service.ORGANISM_TABLE_COLUMNS
+            ],
+            rows=db_service.organisms_to_table_rows(filtered),
+        )
+
+        def do_search() -> None:
+            table.rows = db_service.organisms_to_table_rows(
+                db_service.filter_organisms(orgs, search_term.value),
+            )
+            table.update()
+
+        ui.button("Search", on_click=do_search)
+
+        def export_orgs() -> None:
+            ui.download(
+                db_service.export_organisms_csv_bytes(
+                    db_service.filter_organisms(orgs, search_term.value),
+                ),
+                "organisms.csv",
+            )
+
+        ui.button("Export Filtered Organisms CSV", on_click=export_orgs)
+
+        ui.label("Organism Details").classes("text-h6 mt-4")
+        for org in filtered[:20]:
+            oname = org.get("name", "")
+            genomes = db_service.list_genomes_for_organism_summary(oname)
+            projects = db_service.list_projects_for_organism_summary(oname)
+            with ui.expansion(
+                f"{oname} · {len(genomes)} genomes · {len(projects)} projects",
+                icon="biotech",
+            ).classes("w-full"):
+                if genomes:
+                    ui.label("Linked genomes").classes("text-subtitle2")
+                    gcols = [
+                        {"name": col, "label": col, "field": col}
+                        for col in ("name", "contigs", "total_length")
+                    ]
+                    ui.table(
+                        columns=gcols,
+                        rows=[{c: g.get(c, "") for c in ("name", "contigs", "total_length")} for g in genomes],
+                        pagination=5,
+                    )
+                else:
+                    ui.label("No linked genomes.")
+
+                if projects:
+                    ui.label("Linked projects").classes("text-subtitle2 mt-2")
+                    ui.table(
+                        columns=[
+                            {"name": "name", "label": "Project", "field": "name"},
+                            {"name": "guide_count", "label": "Guides", "field": "guide_count"},
+                        ],
+                        rows=[{"name": pr.get("name", ""), "guide_count": pr.get("guide_count", 0)} for pr in projects],
+                        pagination=5,
+                    )
+    create_footer()
+
+
+def create_genomes_page(state: WebState) -> None:
+    """Standalone page for genomes."""
+    create_header()
+    with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-4"):
+        ui.label("Genomes").classes("text-h5 text-primary")
+
+        if not db_service.is_db_available():
+            ui.label(db_service.db_unavailable_message()).classes("text-negative")
+            return
+
+        with ui.card().classes("w-full"):
+            ui.label("Import Genome").classes("text-h6")
+            imp_name = ui.input("Genome name").classes("w-full")
+            imp_genome = ui.input("FASTA path").classes("w-full")
+            imp_ann = ui.input("Annotation path (GFF/GBK, optional)").classes("w-full")
+            org_options = [""] + db_service.organism_name_options()
+            imp_org = ui.select(org_options, label="Link organism (optional)", value="").classes("w-full")
+
+            def do_import() -> None:
+                if not imp_name.value or not imp_genome.value:
+                    ui.notify("Name and FASTA path required", type="negative")
+                    return
+                try:
+                    summary = db_service.import_genome_record(
+                        imp_name.value,
+                        imp_genome.value,
+                        imp_ann.value or None,
+                        organism_name=imp_org.value or None,
+                    )
+                    ui.notify(
+                        f"Imported {summary['name']}: {summary['contigs']} contigs, "
+                        f"{summary.get('features_imported', 0)} features",
+                        type="positive",
+                    )
+                except Exception as exc:
+                    ui.notify(str(exc), type="negative")
+
+            ui.button("Import Genome", on_click=do_import).props("color=primary")
+
+        with ui.card().classes("w-full"):
+            ui.label("Link Genome to Organism").classes("text-h6")
+            link_g = ui.input("Genome name").classes("w-full")
+            link_o = ui.select(org_options, label="Organism", value="").classes("w-full")
+
+            def do_link() -> None:
+                if not link_g.value or not link_o.value:
+                    ui.notify("Genome and organism required", type="negative")
+                    return
+                try:
+                    if db_service.link_genome_organism(link_g.value, link_o.value):
+                        ui.notify(f"Linked {link_g.value} → {link_o.value}", type="positive")
+                    else:
+                        ui.notify("Genome not found", type="negative")
+                except Exception as exc:
+                    ui.notify(str(exc), type="negative")
+
+            ui.button("Link", on_click=do_link)
+
+        with ui.card().classes("w-full"):
+            ui.label("Delete Genome").classes("text-h6")
+            del_g = ui.input("Genome name to delete").classes("w-full")
+
+            def do_del_g() -> None:
+                if del_g.value and db_service.remove_genome(del_g.value):
+                    ui.notify(f"Deleted genome {del_g.value}")
+
+            ui.button("Delete Genome", on_click=do_del_g, color="negative")
+
+        genomes = db_service.list_genomes_summary()
+        gsearch = ui.input("Search genomes (name)", value="").classes("w-full")
+        gfiltered = db_service.filter_genomes(genomes, gsearch.value)
+        if gfiltered:
+            cols = [
+                {"name": col, "label": col, "field": col}
+                for col in db_service.GENOME_TABLE_COLUMNS
+            ]
+            ui.table(columns=cols, rows=db_service.genomes_to_table_rows(gfiltered))
+
+            def export_genomes() -> None:
+                ui.download(
+                    db_service.export_genomes_csv_bytes(
+                        db_service.filter_genomes(genomes, gsearch.value),
+                    ),
+                    "genomes.csv",
+                )
+
+            ui.button("Export Filtered Genomes CSV", on_click=export_genomes)
+
+            ui.label("Genome Details").classes("text-h6 mt-4")
+            for genome in gfiltered[:20]:
+                gname = genome.get("name", "")
+                gid = genome.get("id")
+                with ui.expansion(
+                    f"{gname} · organism: {genome.get('organism_name') or '—'}",
+                    icon="dna",
+                ).classes("w-full"):
+                    genes = db_service.get_genome_genes(gid, limit=10) if gid else []
+                    if genes:
+                        gcols = [
+                            {"name": col, "label": col.replace("_", " ").title(), "field": col}
+                            for col in db_service.GENE_TABLE_COLUMNS
+                        ]
+                        ui.table(columns=gcols, rows=genes, pagination=5)
+                    else:
+                        ui.label("No genes stored (import with annotation).")
+        else:
+            ui.label("No genomes yet. Import via the form above or CLI.")
+    create_footer()

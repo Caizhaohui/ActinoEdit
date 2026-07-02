@@ -16,13 +16,12 @@ try:
     from actinoedit.db import (
         export_project_guides,
         import_genome,
-        init_database,
         save_guides_from_result,
     )
     from actinoedit.db import (
         list_projects as db_list_projects,
     )
-    from actinoedit.db.database import get_connection
+    from actinoedit.db.config import get_db_url
     DB_AVAILABLE = True
 except Exception:  # pragma: no cover
     DB_AVAILABLE = False
@@ -186,6 +185,9 @@ def _display_scored_summary_table(
     table.add_column("Strand", style="magenta")
     table.add_column("GC%", style="red")
     table.add_column("OffT", style="yellow")
+    table.add_column("CRISPRi", style="cyan")
+    table.add_column("Dist", style="magenta")
+    table.add_column("StrandRel", style="yellow")
     table.add_column("Score", style="blue")
     table.add_column("Rec", style="white")
 
@@ -195,12 +197,18 @@ def _display_scored_summary_table(
         ot_count = len([h for h in hits if h.mismatch_count > 0])  # count only real off
         score_str = f"{sc.final_score:.3f}" if sc else "N/A"
         rec = sc.recommendation if sc else "N/A"
+        crispri = guide.crispri_region_type or ""
+        dist = str(guide.distance_to_start_codon) if guide.distance_to_start_codon is not None else ""
+        rel = guide.target_strand_relation or ""
         table.add_row(
             guide.guide_id,
             f"{guide.contig}:{guide.start}-{guide.end}",
             guide.strand,
             f"{guide.gc_content:.1%}",
             str(ot_count),
+            crispri,
+            dist,
+            rel,
             score_str,
             rec,
         )
@@ -275,59 +283,60 @@ def base_edit(
     target: str = typer.Option(..., "--target", "-t", help="Target gene"),
     editor: str = typer.Option("CBE", "--editor", "-e", help="Base editor type (CBE or ABE)"),
 ) -> None:
-    """Analyze base editing opportunities for a target gene (computational only)."""
+    """Screen base editing outcomes for designed guides (computational screening only)."""
     from actinoedit.core.base_editor import analyze_base_editing
-    from actinoedit.core.models import GuideCandidate
-    from actinoedit.core.target import resolve_target
     from actinoedit.io.fasta import parse_fasta
-    from actinoedit.io.gbk import parse_gbk as parse_gbk_file
-    from actinoedit.io.gff import parse_gff
 
-    console.print("[bold blue]ActinoEdit[/bold blue] - Base Editing Analysis")
+    console.print("[bold blue]ActinoEdit[/bold blue] - Base Editing Screening")
+    console.print("[dim]Computational screening / rough annotation — not experimental validation.[/dim]")
     console.print(f"Editor: {editor}")
 
     if not gff and not gbk:
         _exit_with_error("Either --gff or --gbk must be provided")
 
-    # Load minimal data
-    features = parse_gff(gff) if gff else parse_gbk_file(gbk or "")
-    try:
-        target_region = resolve_target(features, target)
-    except Exception as e:
-        _exit_with_error(str(e))
-
+    annotation_path: str = gff or gbk  # type: ignore[assignment]
+    inp = DesignInput(
+        genome_path=genome,
+        annotation_path=annotation_path,
+        target=target,
+    )
+    result = run_design_pipeline(inp)
+    if not result.guide_candidates:
+        _exit_with_error("No guide candidates found for base editing screening")
+    if result.target_region is None:
+        _exit_with_error("Could not resolve target region")
+    target_region = result.target_region
+    assert target_region is not None
     contigs = parse_fasta(genome)
     contig = contigs.get(target_region.contig)
     if contig is None:
         _exit_with_error("Contig not found")
     assert contig is not None
 
-    # Create a dummy guide in the middle for demo analysis (real usage would come from design)
-    mid = (target_region.start + target_region.end) // 2
-    dummy_guide = GuideCandidate(
-        guide_id="baseedit_demo",
-        contig=target_region.contig,
-        spacer="ATCGATCGATCGATCGATCG",  # placeholder
-        pam="NGG",
-        start=mid,
-        end=mid + 19,
-        strand="+",
-        pam_start=mid + 20,
-        pam_end=mid + 22,
-        cut_site=mid + 17,
-        gc_content=0.5,
+    score_map = {s.guide_id: s for s in result.guide_scores}
+    guide = max(
+        result.guide_candidates,
+        key=lambda g: score_map[g.guide_id].final_score if g.guide_id in score_map else 0.0,
     )
 
-    # Extract rough subsequence
+    cut_site = guide.cut_site or guide.start
     try:
-        subseq = contig.get_subsequence(max(1, mid - 30), min(contig.length, mid + 50))
+        subseq = contig.get_subsequence(max(1, cut_site - 30), min(contig.length, cut_site + 50))
     except Exception:
         subseq = "N" * 80
 
     editor_type: Literal["CBE", "ABE"] = "CBE" if editor.upper() == "CBE" else "ABE"
-    pred = analyze_base_editing(dummy_guide, subseq, editor=editor_type, cds_start=target_region.start, cds_end=target_region.end)
+    pred = analyze_base_editing(
+        guide,
+        subseq,
+        editor=editor_type,
+        cds_start=target_region.start,
+        cds_end=target_region.end,
+    )
 
-    console.print(f"\nGuide position: {dummy_guide.start}-{dummy_guide.end}")
+    top_score = score_map.get(guide.guide_id)
+    console.print(f"\nTop guide: {guide.guide_id} (score={top_score.final_score if top_score else 'N/A'})")
+    console.print(f"Guide position: {guide.start}-{guide.end}")
     console.print(f"Editable bases in window: {pred.editable_bases}")
     if pred.codon_change:
         console.print(f"Codon change: {pred.codon_change}")
@@ -362,13 +371,63 @@ db_app = typer.Typer(help="Local database commands (optional SQLite project stor
 
 @db_app.command("init")
 def db_init(db_path: str | None = typer.Option(None, "--db", help="Custom database path")) -> None:
-    """Initialize (or create) the local SQLite database."""
+    """Initialize the local database via Alembic migrations."""
     if not DB_AVAILABLE:
         _exit_with_error("Database module not available")
-    conn = get_connection(db_path) if db_path else get_connection()
-    init_database(conn)
-    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
-    console.print(f"[green]Database initialized at[/green] {db_file}")
+    if db_path:
+        db_url = f"sqlite:///{Path(db_path).expanduser().resolve()}"
+    else:
+        db_url = get_db_url()
+    from actinoedit.db.migrations import upgrade_database
+
+    revision = upgrade_database(db_url)
+    from actinoedit.db.config import get_sqlite_path
+
+    sqlite_path = get_sqlite_path(db_url)
+    location = str(sqlite_path) if sqlite_path else db_url
+    console.print(f"[green]Database initialized at[/green] {location}")
+    console.print(f"[dim]Schema revision:[/dim] {revision}")
+
+
+@db_app.command("migrate")
+def db_migrate(
+    db_path: str | None = typer.Option(None, "--db", help="Custom database path"),
+    revision: str = typer.Option("head", "--revision", "-r", help="Target Alembic revision"),
+) -> None:
+    """Apply pending Alembic migrations."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    if db_path:
+        db_url = f"sqlite:///{Path(db_path).expanduser().resolve()}"
+    else:
+        db_url = get_db_url()
+    from actinoedit.db.migrations import upgrade_database
+
+    current = upgrade_database(db_url, revision=revision)
+    console.print(f"[green]Migrations applied[/green] (now at {current})")
+
+
+@db_app.command("status")
+def db_status(db_path: str | None = typer.Option(None, "--db", help="Custom database path")) -> None:
+    """Show Alembic migration status for the configured database."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    if db_path:
+        db_url = f"sqlite:///{Path(db_path).expanduser().resolve()}"
+    else:
+        db_url = get_db_url()
+    from actinoedit.db.migrations import get_database_status
+
+    status = get_database_status(db_url)
+    table = Table(title="Database Migration Status")
+    table.add_column("Property")
+    table.add_column("Value")
+    table.add_row("DB URL", status["db_url"])
+    table.add_row("Current revision", status["current_revision"] or "(none)")
+    table.add_row("Head revision", status["head_revision"] or "(none)")
+    table.add_row("Pending migrations", "yes" if status["pending_migrations"] else "no")
+    table.add_row("Up to date", "yes" if status["up_to_date"] else "no")
+    console.print(table)
 
 
 @db_app.command("list")
@@ -384,10 +443,106 @@ def db_list() -> None:
     table.add_column("ID")
     table.add_column("Name")
     table.add_column("Profile")
+    table.add_column("Organism")
+    table.add_column("Genome")
+    table.add_column("Guides")
     table.add_column("Created")
     for p in projs:
-        table.add_row(str(p.get("id")), p.get("name", ""), p.get("organism_profile") or "", str(p.get("created_at", ""))[:19])
+        table.add_row(
+            str(p.get("id")),
+            p.get("name", ""),
+            p.get("organism_profile") or "",
+            p.get("organism_name") or "",
+            p.get("genome_name") or "",
+            str(p.get("guide_count", 0)),
+            str(p.get("created_at", ""))[:19],
+        )
     console.print(table)
+
+
+@db_app.command("show-project")
+def db_show_project(
+    project: str = typer.Option(..., "--project", "-p", help="Project name"),
+) -> None:
+    """Show project details including linked organism and genome."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    from actinoedit.db import get_project
+
+    detail = get_project(project)
+    if detail is None:
+        _exit_with_error(f"Project not found: {project}")
+        return
+    console.print(f"[bold]{detail['name']}[/bold] (id={detail['id']})")
+    console.print(f"  Description: {detail.get('description') or '—'}")
+    console.print(f"  Profile: {detail.get('organism_profile') or '—'}")
+    console.print(f"  Organism: {detail.get('organism_name') or '—'}")
+    console.print(f"  Genome: {detail.get('genome_name') or '—'}")
+    console.print(f"  Guides saved: {detail.get('guide_count', 0)}")
+    console.print(f"  Created: {detail.get('created_at')}")
+
+
+@db_app.command("create-project")
+def db_create_project(
+    name: str = typer.Option(..., "--name", "-n", help="Project name"),
+    description: str = typer.Option("", "--description", "-d", help="Description"),
+    profile: str | None = typer.Option(None, "--profile", "-r", help="Design profile"),
+    organism: str | None = typer.Option(None, "--organism", help="Link to organism name"),
+    genome: str | None = typer.Option(None, "--genome", "-g", help="Link to genome name"),
+) -> None:
+    """Create a project with optional organism and genome links."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    from actinoedit.db import create_project
+
+    try:
+        pid = create_project(name, description, profile, organism_name=organism, genome_name=genome)
+    except ValueError as exc:
+        _exit_with_error(str(exc))
+    console.print(f"[green]Project created[/green] (id={pid}): {name}")
+    if organism:
+        console.print(f"  Organism: {organism}")
+    if genome:
+        console.print(f"  Genome: {genome}")
+
+
+@db_app.command("link-project")
+def db_link_project(
+    project: str = typer.Option(..., "--project", "-p", help="Project name"),
+    organism: str | None = typer.Option(None, "--organism", help="Organism name"),
+    genome: str | None = typer.Option(None, "--genome", "-g", help="Genome name"),
+) -> None:
+    """Link a project to an organism and/or genome."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    from actinoedit.db import update_project
+
+    if not organism and not genome:
+        _exit_with_error("Provide --organism and/or --genome")
+    try:
+        if not update_project(project, organism_name=organism, genome_name=genome):
+            _exit_with_error(f"Project not found: {project}")
+    except ValueError as exc:
+        _exit_with_error(str(exc))
+    console.print(f"[green]Updated links for project[/green] '{project}'")
+
+
+@db_app.command("link-genome")
+def db_link_genome(
+    genome: str = typer.Option(..., "--genome", "-g", help="Genome name"),
+    organism: str = typer.Option(..., "--organism", help="Organism name"),
+) -> None:
+    """Link an imported genome to an organism record."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    from actinoedit.db import link_genome_to_organism
+
+    try:
+        if not link_genome_to_organism(genome, organism):
+            _exit_with_error(f"Genome not found: {genome}")
+    except ValueError as exc:
+        _exit_with_error(str(exc))
+    console.print(f"[green]Linked genome[/green] '{genome}' → organism '{organism}'")
 
 
 @db_app.command("save-guides")
@@ -452,18 +607,21 @@ def db_import_genome(
     genome: str = typer.Option(..., "--genome", "-g", help="Path to genome FASTA"),
     gff: str | None = typer.Option(None, "--gff", help="Optional GFF3 annotation"),
     gbk: str | None = typer.Option(None, "--gbk", help="Optional GenBank annotation"),
+    organism: str | None = typer.Option(None, "--organism", help="Associated organism name"),
 ) -> None:
     """Import a genome (and annotation) into the local DB for project management."""
     if not DB_AVAILABLE:
         _exit_with_error("Database module not available")
 
     ann = gff or gbk
-    summary = import_genome(name, genome, ann)
+    summary = import_genome(name, genome, ann, organism)
     console.print("[green]Genome imported successfully[/green]")
     console.print(f"  ID: {summary['genome_id']}")
     console.print(f"  Contigs: {summary['contigs']}, Length: {summary['total_length']}, GC: {summary['gc']:.2%}")
     if summary.get("features_imported"):
         console.print(f"  Features: {summary['features_imported']}")
+    if organism:
+        console.print(f"  Organism: {organism}")
 
 
 @db_app.command("export")
@@ -494,10 +652,107 @@ def db_list_genomes() -> None:
     table.add_column("Name")
     table.add_column("Contigs")
     table.add_column("Length")
+    table.add_column("Organism")
     table.add_column("GC")
     for g in genomes:
-        table.add_row(str(g.get("id")), g.get("name",""), str(g.get("contigs","")), str(g.get("total_length","")), f"{g.get('gc',0):.2%}")
+        table.add_row(
+            str(g.get("id")),
+            g.get("name", ""),
+            str(g.get("contigs", "")),
+            str(g.get("total_length", "")),
+            g.get("organism_name") or "",
+            f"{g.get('gc', 0):.2%}",
+        )
     console.print(table)
+
+
+@db_app.command("list-organisms")
+def db_list_organisms() -> None:
+    """List organisms/strains."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    from actinoedit.db import list_organisms
+    orgs = list_organisms()
+    if not orgs:
+        console.print("No organisms recorded yet. Use db import-genome or save.")
+        return
+    table = Table(title="Organisms")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("Species")
+    table.add_column("Strain")
+    for o in orgs:
+        table.add_row(str(o.get("id")), o.get("name",""), o.get("species") or "", o.get("strain") or "")
+    console.print(table)
+
+
+@db_app.command("set-organism")
+def db_set_organism(
+    name: str = typer.Option(..., "--name", "-n", help="Organism name"),
+    project: str = typer.Option(None, "--project", "-p", help="Associate to project (optional)"),
+) -> None:
+    """Record an organism/strain (optionally link to project)."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    from actinoedit.db import save_organism
+    oid = save_organism(name)
+    console.print(f"[green]Organism '{name}' recorded (id={oid})[/green]")
+    if project:
+        console.print("  (Note: project association via save-guides or future enhancement)")
+
+
+@db_app.command("save-validation")
+def db_save_validation(
+    project: str = typer.Option(..., "--project", "-p", help="Project name"),
+    guide_id: str = typer.Option(..., "--guide-id", help="Guide ID from design"),
+    result: str = typer.Option(..., "--result", help="Validation result (e.g. success/fail)"),
+    details: str = typer.Option("", "--details", help="Details"),
+) -> None:
+    """Save validation result linked to guide in project."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    from actinoedit.db import save_validation_result
+    vid = save_validation_result(project, guide_id, result, details)
+    console.print(f"[green]Validation saved (id={vid}) for guide {guide_id} in {project}[/green]")
+
+
+@db_app.command("list-validations")
+def db_list_validations(
+    project: str = typer.Option(None, "--project", "-p", help="Filter by project"),
+    guide_id: str = typer.Option(None, "--guide-id", help="Filter by guide_id"),
+) -> None:
+    """List validation results."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    from actinoedit.db import get_validation_results
+    vals = get_validation_results(project, guide_id)
+    if not vals:
+        console.print("No validation results found.")
+        return
+    table = Table(title="Validation Results")
+    table.add_column("ID")
+    table.add_column("Project ID")
+    table.add_column("Guide ID")
+    table.add_column("Result")
+    table.add_column("Details")
+    for v in vals:
+        table.add_row(str(v.get("id")), str(v.get("project_id")), v.get("guide_id",""), v.get("result",""), (v.get("details") or "")[:30])
+    console.print(table)
+
+
+@db_app.command("db-info")
+def db_info() -> None:
+    """Show current database config and mode."""
+    if not DB_AVAILABLE:
+        _exit_with_error("Database module not available")
+    from actinoedit.db import get_db_url, is_postgres, load_config
+    url = get_db_url()
+    cfg = load_config()
+    console.print(f"DB URL: {url}")
+    console.print(f"Is Postgres: {is_postgres(url)}")
+    console.print(f"Config loaded: {bool(cfg)}")
+    if cfg:
+        console.print(cfg)
 
 
 @db_app.command("list-genes")

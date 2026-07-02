@@ -76,6 +76,9 @@ DEFAULT_TEMPLATE = """
             <th>PAM</th>
             <th>GC%</th>
             <th>BGC</th>
+            <th>CRISPRi Region</th>
+            <th>Dist to Start</th>
+            <th>Strand Rel.</th>
             <th>Score</th>
             <th>Recommendation</th>
         </tr>
@@ -87,6 +90,9 @@ DEFAULT_TEMPLATE = """
             <td>{{ guide.pam }}</td>
             <td>{{ "%.1f"|format(guide.gc_content * 100) }}%</td>
             <td>{{ guide.bgc_context or "" }}</td>
+            <td>{{ guide.crispri_region_type or "" }}</td>
+            <td>{{ guide.distance_to_start_codon or "" }}</td>
+            <td>{{ guide.target_strand_relation or "" }}</td>
             <td>{{ "%.3f"|format(guide_scores[guide.guide_id].final_score) if guide.guide_id in guide_scores else "N/A" }}</td>
             <td class="{{ guide_scores[guide.guide_id].recommendation if guide.guide_id in guide_scores else "" }}">
                 {{ guide_scores[guide.guide_id].recommendation_label if guide.guide_id in guide_scores else "N/A" }}

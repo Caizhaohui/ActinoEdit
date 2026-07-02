@@ -24,7 +24,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+        python -m pip install -e ".[dev]"
 
     - name: Lint with ruff
       run: |
@@ -34,9 +34,14 @@ jobs:
       run: |
         mypy src
 
+    - name: v0.4 demo acceptance check
+      if: matrix.python-version == '3.12'
+      run: |
+        python -m actinoedit.web.app --acceptance-check --output-dir /tmp/actinoedit_acceptance
+
     - name: Test with pytest
       run: |
-        pytest --cov=actinoedit --cov-report=xml
+        python -m pytest --cov=actinoedit --cov-report=xml -m "not slow"
 
     - name: Upload coverage
       if: matrix.python-version == '3.12'

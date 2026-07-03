@@ -34,7 +34,22 @@ def test_cancel_design_sets_status() -> None:
     state.task_status = "running"
     cancel_design(state)
     assert state.cancel_requested is True
-    assert state.task_status == "cancelled"
+    assert state.task_status == "cancelling"
+
+
+def test_temp_upload_cleanup(tmp_path) -> None:
+    state = WebState()
+    old = tmp_path / "old.fasta"
+    new = tmp_path / "new.fasta"
+    old.write_text(">x\nA\n")
+    new.write_text(">y\nC\n")
+    state.temp_upload_paths = [str(old)]
+    state.register_temp_upload(str(new))
+    assert not old.exists()
+    assert new.exists()
+    state.cleanup_temp_uploads()
+    assert not new.exists()
+    assert state.temp_upload_paths == []
 
 
 def test_show_no_guides_message() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import traceback
+from pathlib import Path
 from typing import Any
 
 from nicegui import ui
@@ -25,6 +26,8 @@ from actinoedit.web.components import (
     create_task_status_panel,
 )
 from actinoedit.web.runner import (
+    autosave_design_reports,
+    build_design_run_meta,
     cancel_design,
     get_profile_names,
     run_design_background,
@@ -62,7 +65,7 @@ def create_main_page(state: WebState) -> None:
                 "Cancel",
                 icon="stop",
                 on_click=lambda: cancel_design(state),
-            ).props("color=negative outline").bind_enabled_from(state, "is_running")
+            ).props("color=negative outline").bind_enabled_from(state, "show_progress")
 
         # Output section
         create_error_display(state)
@@ -81,7 +84,11 @@ def create_main_page(state: WebState) -> None:
                 res = state.result
                 if res:
                     try:
-                        n = db_service.save_design_to_project(res, proj_name.value or "web_design")
+                        n = db_service.save_design_to_project(
+                            res,
+                            proj_name.value or "web_design",
+                            design_run_meta=build_design_run_meta(state, res),
+                        )
                         ui.notify(f"Saved {n} guides to DB project", type="positive")
                     except Exception as e:
                         ui.notify(str(e), type="negative")
@@ -101,23 +108,13 @@ def _run_design_handler(state: WebState) -> None:
             ui.notify(state.status_message or "Design did not complete", type="warning")
             return
 
+        if result.cancelled:
+            ui.notify(state.status_message or "Design cancelled", type="warning")
+            return
+
         try:
-            from pathlib import Path
-
-            from actinoedit.reports import write_design_reports
-
-            auto_dir = Path("results") / "web_autosave"
-            auto_prefix = str(auto_dir / "last_design")
-            write_design_reports(
-                result.guide_candidates,
-                result.guide_scores,
-                result.off_target_hits,
-                result.target_region,
-                result.warnings,
-                auto_prefix,
-                {"source": "web-auto"},
-            )
-            ui.notify("Reports auto-saved to results/web_autosave/", type="info")
+            autosave_design_reports(state, result)
+            ui.notify(f"Reports auto-saved to {state.report_output_dir}/", type="info")
         except Exception as save_err:
             ui.notify(f"Auto-save skipped: {save_err}", type="warning")
 
@@ -221,7 +218,7 @@ def create_projects_page(state: WebState) -> None:
             return
 
         _render_project_create_card(state)
-        _render_project_export_card()
+        _render_project_export_card(state)
         _render_projects_list(state)
         _render_organisms_preview()
         _render_genomes_preview()
@@ -259,19 +256,30 @@ def _render_project_create_card(state: WebState) -> None:
         ui.button("Create Project", on_click=do_create).props("color=primary")
 
 
-def _render_project_export_card() -> None:
+def _render_project_export_card(state: WebState) -> None:
     with ui.card().classes("w-full"):
         ui.label("Export DB Reports").classes("text-h6")
         exp_proj = ui.input("Project to export guides").classes("w-full")
+        exp_dir = ui.input(
+            "Export directory",
+            value=state.export_output_dir,
+        ).classes("w-full").bind_value(state, "export_output_dir")
+        exp_name = ui.input(
+            "Output filename (optional, defaults to <project>_guides.csv)",
+            value="",
+        ).classes("w-full")
 
         def do_export_db() -> None:
             if not exp_proj.value:
                 return
-            out = db_service.default_project_export_path(
-                exp_proj.value,
-                subdir="",
-                suffix="_db",
-            )
+            if exp_name.value.strip():
+                out = Path(exp_dir.value or state.export_output_dir) / exp_name.value.strip()
+            else:
+                out = db_service.default_project_export_path(
+                    exp_proj.value,
+                    base_dir=exp_dir.value or state.export_output_dir,
+                    suffix="_db",
+                )
             try:
                 db_service.export_guides_csv(exp_proj.value, out)
                 ui.notify(f"Exported to {out}")
@@ -348,13 +356,17 @@ def _render_projects_list(state: WebState) -> None:
                 ui.button("Update Links", on_click=do_link).props("size=sm")
 
             with ui.row():
-                ui.button("Export CSV", on_click=lambda n=pname: _export_project(n)).props("size=sm")
+                ui.button(
+                    "Export CSV",
+                    on_click=lambda n=pname: _export_project(n, export_dir=state.export_output_dir),
+                ).props("size=sm")
 
                 def do_delete(n: str = pname) -> None:
-                    if db_service.delete_project_record(n):
-                        ui.notify(f"Deleted {n}", type="warning")
-                    else:
-                        ui.notify("Delete failed", type="negative")
+                    _confirm_delete(
+                        title=f"Delete project '{n}'?",
+                        message="This permanently removes the project and all saved guides.",
+                        on_confirm=lambda: _delete_project_confirmed(n),
+                    )
 
                 ui.button("Delete Project", on_click=do_delete, color="red").props("size=sm outline")
 
@@ -365,7 +377,12 @@ def _render_projects_list(state: WebState) -> None:
                     if not res:
                         return
                     try:
-                        n_saved = db_service.save_design_to_project(res, n, replace_existing=False)
+                        n_saved = db_service.save_design_to_project(
+                            res,
+                            n,
+                            replace_existing=False,
+                            design_run_meta=build_design_run_meta(state, res),
+                        )
                         ui.notify(f"Saved {n_saved} guides to {n}", type="positive")
                     except Exception as ex:
                         ui.notify(f"Save failed: {ex}", type="negative")
@@ -409,13 +426,43 @@ def _render_genomes_preview() -> None:
                 ui.label("No genes stored (import with annotation).")
 
 
-def _export_project(project_name: str) -> None:
+def _export_project(project_name: str, *, export_dir: str = "results/db_exports") -> None:
     try:
-        out = db_service.default_project_export_path(project_name)
+        out = db_service.default_project_export_path(
+            project_name,
+            base_dir=export_dir,
+        )
         db_service.export_guides_csv(project_name, out)
         ui.notify(f"Exported to {out}", type="positive")
     except Exception as e:
         ui.notify(f"Export failed: {e}", type="negative")
+
+
+def _confirm_delete(
+    *,
+    title: str,
+    message: str,
+    on_confirm: Any,
+) -> None:
+    """Show a confirmation dialog before destructive DB actions."""
+    with ui.dialog() as dialog, ui.card():
+        ui.label(title).classes("text-h6")
+        ui.label(message).classes("text-body2")
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button("Cancel", on_click=dialog.close).props("flat")
+            ui.button(
+                "Delete",
+                on_click=lambda: (on_confirm(), dialog.close()),
+                color="negative",
+            )
+    dialog.open()
+
+
+def _delete_project_confirmed(project_name: str) -> None:
+    if db_service.delete_project_record(project_name):
+        ui.notify(f"Deleted {project_name}", type="warning")
+    else:
+        ui.notify("Delete failed", type="negative")
 
 
 def create_organisms_page(state: WebState) -> None:
@@ -446,11 +493,22 @@ def create_organisms_page(state: WebState) -> None:
             del_name = ui.input("Name to delete").classes("w-full")
 
             def do_del() -> None:
-                if del_name.value:
-                    if db_service.remove_organism(del_name.value):
-                        ui.notify(f"Deleted {del_name.value}")
+                if not del_name.value:
+                    return
+                name = del_name.value
+
+                def _confirmed() -> None:
+                    if db_service.remove_organism(name):
+                        ui.notify(f"Deleted {name}")
+                        del_name.value = ""
                     else:
                         ui.notify("Not found or delete failed")
+
+                _confirm_delete(
+                    title=f"Delete organism '{name}'?",
+                    message="This permanently removes the organism record.",
+                    on_confirm=_confirmed,
+                )
 
             ui.button("Delete", on_click=do_del, color="negative")
 
@@ -604,8 +662,22 @@ def create_genomes_page(state: WebState) -> None:
             del_g = ui.input("Genome name to delete").classes("w-full")
 
             def do_del_g() -> None:
-                if del_g.value and db_service.remove_genome(del_g.value):
-                    ui.notify(f"Deleted genome {del_g.value}")
+                if not del_g.value:
+                    return
+                name = del_g.value
+
+                def _confirmed() -> None:
+                    if db_service.remove_genome(name):
+                        ui.notify(f"Deleted genome {name}")
+                        del_g.value = ""
+                    else:
+                        ui.notify("Delete failed", type="negative")
+
+                _confirm_delete(
+                    title=f"Delete genome '{name}'?",
+                    message="This permanently removes the genome and linked gene records.",
+                    on_confirm=_confirmed,
+                )
 
             ui.button("Delete Genome", on_click=do_del_g, color="negative")
 

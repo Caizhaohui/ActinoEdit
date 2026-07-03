@@ -64,8 +64,13 @@ def run_demo_acceptance(
         result.target_region,
         result.warnings,
         str(prefix),
-        {"source": "demo-acceptance"},
+        {
+            "source": "demo-acceptance",
+            "version": result.version or "",
+            "profile": result.profile_name or state.profile_name,
+        },
     )
+    result.set_report_paths_from_files(report_paths)
     for path in report_paths:
         if not Path(path).is_file():
             raise RuntimeError(f"Expected report missing: {path}")
@@ -85,12 +90,18 @@ def run_demo_acceptance(
                 "genome_path": state.genome_path,
                 "annotation_path": state.annotation_path,
                 "target": state.target,
-                "organism_profile": state.profile_name,
-                "pam": state.pam,
+                "organism_profile": result.profile_name or state.profile_name,
+                "pam": result.resolved_params.get("pam", state.pam),
                 "design_mode": state.design_mode,
-                "spacer_length": state.spacer_length,
-                "max_mismatches": state.max_mismatches,
-                "parameters": {"source": "demo-acceptance"},
+                "spacer_length": result.resolved_params.get("spacer_length", state.spacer_length),
+                "max_mismatches": result.resolved_params.get("max_mismatches", state.max_mismatches),
+                "parameters": {
+                    "source": "demo-acceptance",
+                    "version": result.version,
+                    "resolved_params": result.resolved_params,
+                    "input_file_summary": result.input_file_summary,
+                },
+                "report_paths": result.report_paths,
             },
         )
         guides = get_project_guides(project_name)

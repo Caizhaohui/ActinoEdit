@@ -22,6 +22,8 @@ from actinoedit.web.pages import (
 )
 from actinoedit.web.state import WebState
 
+DEFAULT_WEB_HOST = "127.0.0.1"
+
 
 def create_app(*, demo_mode: bool = False, auto_run_design: bool = False) -> WebState:
     """Create and configure the NiceGUI application.
@@ -93,7 +95,11 @@ def main() -> None:
         actinoedit-web --acceptance-check
     """
     parser = argparse.ArgumentParser(description="ActinoEdit Web Application")
-    parser.add_argument("--host", default=None, help="Host to bind (default: 127.0.0.1 in demo mode)")
+    parser.add_argument(
+        "--host",
+        default=DEFAULT_WEB_HOST,
+        help=f"Host to bind (default: {DEFAULT_WEB_HOST})",
+    )
     parser.add_argument("--port", type=int, default=8080, help="Port to bind (default: 8080)")
     parser.add_argument("--show", action="store_true", help="Open browser automatically")
     parser.add_argument(
@@ -130,7 +136,7 @@ def main() -> None:
             db_url = f"sqlite:///{db_path}"
         raise SystemExit(_run_acceptance_check(args.output_dir, db_url))
 
-    host = args.host or ("127.0.0.1" if args.demo else "0.0.0.0")
+    host = args.host
     show_browser = args.show or args.demo
 
     create_app(demo_mode=args.demo, auto_run_design=args.run_design)

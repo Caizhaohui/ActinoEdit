@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -11,7 +12,15 @@ from actinoedit.core.models import (
 )
 from actinoedit.core.pipeline import DesignResult
 
-TaskStatus = Literal["idle", "running", "completed", "failed", "cancelled", "timeout"]
+TaskStatus = Literal[
+    "idle",
+    "running",
+    "cancelling",
+    "completed",
+    "failed",
+    "cancelled",
+    "timeout",
+]
 
 
 @dataclass
@@ -43,6 +52,13 @@ class WebState:
     # Optional BGC for actinomycete context
     bgc_path: str = ""
 
+    # Export / output preferences
+    export_output_dir: str = "results/db_exports"
+    report_output_dir: str = "results/web_autosave"
+
+    # Temp uploads tracked for cleanup
+    temp_upload_paths: list[str] = field(default_factory=list)
+
     # Design results
     result: DesignResult | None = None
     is_running: bool = False
@@ -70,12 +86,27 @@ class WebState:
         self.status_message = ""
         self.progress_messages = []
 
+    def register_temp_upload(self, path: str) -> None:
+        """Track an uploaded temp file and remove any previously tracked uploads."""
+        self.cleanup_temp_uploads()
+        self.temp_upload_paths = [path]
+
+    def cleanup_temp_uploads(self) -> None:
+        """Remove tracked temporary upload files."""
+        for path in self.temp_upload_paths:
+            try:
+                if path and os.path.isfile(path):
+                    os.remove(path)
+            except OSError:
+                continue
+        self.temp_upload_paths = []
+
     def request_cancel(self) -> None:
         """Request cancellation of the active background design task."""
         self.cancel_requested = True
         if self.is_running:
-            self.task_status = "cancelled"
-            self.status_message = "Cancellation requested..."
+            self.task_status = "cancelling"
+            self.status_message = "Cancellation requested; waiting for pipeline to stop..."
 
     def add_progress(self, message: str) -> None:
         """Add a progress message."""
@@ -95,6 +126,11 @@ class WebState:
     def show_task_status(self) -> bool:
         """Whether the task status panel should be visible."""
         return self.task_status != "idle"
+
+    @property
+    def show_progress(self) -> bool:
+        """Whether the progress panel should be visible."""
+        return self.is_running or self.task_status == "cancelling"
 
     @property
     def show_no_guides_message(self) -> bool:

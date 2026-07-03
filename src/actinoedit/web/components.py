@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from nicegui import ui
 
 from actinoedit.web.state import WebState
@@ -39,8 +41,15 @@ def create_file_inputs(state: WebState) -> None:
             import tempfile
 
             try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".fasta") as tmp:
+                upload_dir = Path(tempfile.gettempdir()) / "actinoedit_uploads"
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=".fasta",
+                    dir=upload_dir,
+                ) as tmp:
                     shutil.copyfileobj(e.content, tmp)
+                    state.register_temp_upload(tmp.name)
                     state.genome_path = tmp.name
                 state.genome_upload_status = f"Uploaded: {os.path.basename(state.genome_path)}"
                 ui.notify(state.genome_upload_status, type="positive")
@@ -55,8 +64,15 @@ def create_file_inputs(state: WebState) -> None:
 
             suffix = ".gff" if state.annotation_format == "gff" else ".gbk"
             try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                upload_dir = Path(tempfile.gettempdir()) / "actinoedit_uploads"
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=suffix,
+                    dir=upload_dir,
+                ) as tmp:
                     shutil.copyfileobj(e.content, tmp)
+                    state.register_temp_upload(tmp.name)
                     state.annotation_path = tmp.name
                 state.annotation_upload_status = f"Uploaded: {os.path.basename(state.annotation_path)}"
                 ui.notify(state.annotation_upload_status, type="positive")
@@ -176,16 +192,23 @@ def create_task_status_panel(state: WebState) -> None:
 
 
 def create_progress_panel(state: WebState) -> None:
-    """Create progress display panel.
-
-    Args:
-        state: Application state.
-    """
-    with ui.card().classes("w-full").bind_visibility_from(state, "is_running"):
+    """Create progress display panel with live refresh during long runs."""
+    with ui.card().classes("w-full").bind_visibility_from(state, "show_progress"):
         ui.label("Progress").classes("text-h6")
-        log_area = ui.log(max_lines=20).classes("w-full h-48")
+        log_area = ui.log(max_lines=50).classes("w-full h-48")
+        last_count = {"n": 0}
+
+        def refresh_log() -> None:
+            if len(state.progress_messages) <= last_count["n"]:
+                return
+            for msg in state.progress_messages[last_count["n"] :]:
+                log_area.push(msg)
+            last_count["n"] = len(state.progress_messages)
+
         for msg in state.progress_messages:
             log_area.push(msg)
+        last_count["n"] = len(state.progress_messages)
+        ui.timer(0.5, refresh_log)
 
 
 def create_empty_result_panel(state: WebState) -> None:
@@ -228,6 +251,13 @@ def create_summary_panel(state: WebState) -> None:
             with ui.expansion("Warnings", icon="warning").classes("w-full"):
                 for w in state.result.warnings:
                     ui.label(w).classes("text-warning")
+
+        if state.result and state.result.resolved_params:
+            with ui.expansion("Run Metadata", icon="info").classes("w-full"):
+                ui.label(f"Profile: {state.result.profile_name or '—'}").classes("text-caption")
+                ui.label(f"Version: {state.result.version or '—'}").classes("text-caption")
+                if state.result.report_paths:
+                    ui.label(f"Reports: {state.result.report_paths}").classes("text-caption")
 
         if state.design_mode == "crispri" and state.result:
             ui.chip("CRISPRi mode: columns for promoter/early CDS shown in table", color="info")

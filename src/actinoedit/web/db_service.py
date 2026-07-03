@@ -182,14 +182,11 @@ def export_guides_csv(project_name: str, output_path: str | Path) -> str:
 def default_project_export_path(
     project_name: str,
     *,
-    subdir: str = "db_exports",
+    base_dir: str | Path = "results/db_exports",
     suffix: str = "_guides",
 ) -> Path:
     """Default filesystem path for exporting a project's guides."""
-    base = Path("results")
-    if subdir:
-        base = base / subdir
-    return base / f"{project_name}{suffix}.csv"
+    return Path(base_dir) / f"{project_name}{suffix}.csv"
 
 
 # ------------------------------------------------------------------

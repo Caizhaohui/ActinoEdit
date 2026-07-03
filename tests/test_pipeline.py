@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from actinoedit import __version__
 from actinoedit.core.pipeline import (
     DesignInput,
     DesignResult,
@@ -123,6 +124,38 @@ class TestRunDesignPipeline:
 
         with pytest.raises(FileNotFoundError):
             run_design_pipeline(inp)
+
+    def test_pipeline_does_not_mutate_input(self, demo_files: tuple[Path, Path]) -> None:
+        """Profile resolution must not modify the caller's DesignInput."""
+        fasta_file, gff_file = demo_files
+        inp = DesignInput(
+            genome_path=str(fasta_file),
+            annotation_path=str(gff_file),
+            target="SCO0001",
+            organism_profile="streptomyces",
+            pam="NGG",
+            spacer_length=20,
+            max_mismatches=3,
+        )
+        original = (inp.pam, inp.spacer_length, inp.max_mismatches)
+        run_design_pipeline(inp)
+        assert (inp.pam, inp.spacer_length, inp.max_mismatches) == original
+
+    def test_pipeline_reproducibility_metadata(self, demo_files: tuple[Path, Path]) -> None:
+        """DesignResult should capture resolved params, profile, inputs, and version."""
+        fasta_file, gff_file = demo_files
+        inp = DesignInput(
+            genome_path=str(fasta_file),
+            annotation_path=str(gff_file),
+            target="SCO0001",
+            organism_profile="streptomyces",
+        )
+        result = run_design_pipeline(inp)
+        assert result.version == __version__
+        assert result.profile_name == "streptomyces"
+        assert result.resolved_params["pam"]
+        assert "genome" in result.input_file_summary
+        assert "sha256" in result.input_file_summary["genome"]
 
     def test_pipeline_progress_callback(self, demo_files: tuple[Path, Path]) -> None:
         """Test pipeline with progress callback."""

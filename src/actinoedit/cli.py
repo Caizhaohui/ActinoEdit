@@ -154,6 +154,7 @@ def design(
             effective_prefix,
             params,
         )
+        result.set_report_paths_from_files(created)
         console.print("\n[bold]Reports generated:[/bold]")
         for p in created:
             console.print(f"  [green]{p}[/green]")

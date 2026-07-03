@@ -7,7 +7,6 @@ All functions accept optional ``session`` and ``db_url`` for test isolation.
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -26,6 +25,7 @@ from actinoedit.db.models import (
     ValidationResult,
 )
 from actinoedit.db.session import open_session
+from actinoedit.db.timeutil import utc_now
 from actinoedit.io.fasta import parse_fasta
 from actinoedit.io.gbk import parse_gbk
 from actinoedit.io.gff import parse_gff
@@ -367,8 +367,8 @@ def create_design_run(
             max_mismatches=max_mismatches,
             parameters_json=json.dumps(parameters or {}),
             status=status,
-            started_at=datetime.utcnow(),
-            completed_at=datetime.utcnow(),
+            started_at=utc_now(),
+            completed_at=utc_now(),
             report_csv_path=reports.get("csv"),
             report_xlsx_path=reports.get("xlsx"),
             report_html_path=reports.get("html"),
@@ -446,8 +446,8 @@ def save_guides_from_result(
             max_mismatches=meta.get("max_mismatches"),
             parameters_json=json.dumps(meta.get("parameters") or {}),
             status=str(meta.get("status", "completed")),
-            started_at=datetime.utcnow(),
-            completed_at=datetime.utcnow(),
+            started_at=utc_now(),
+            completed_at=utc_now(),
             report_csv_path=reports.get("csv"),
             report_xlsx_path=reports.get("xlsx"),
             report_html_path=reports.get("html"),

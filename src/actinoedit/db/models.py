@@ -5,7 +5,6 @@ Used for both SQLite and PostgreSQL backends.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -21,6 +20,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base
 
+from actinoedit.db.timeutil import utc_now
+
 Base: Any = declarative_base()
 
 
@@ -30,7 +31,7 @@ class Project(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, unique=True, nullable=False)
     description = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
     organism_profile = Column(String)
     organism_id = Column(Integer, ForeignKey("organisms.id", ondelete="SET NULL"))
     genome_id = Column(Integer, ForeignKey("genomes.id", ondelete="SET NULL"))
@@ -49,7 +50,7 @@ class Genome(Base):
     contigs = Column(Integer, default=0)
     total_length = Column(Integer, default=0)
     gc = Column(Float, default=0.0)
-    imported_at = Column(DateTime, default=datetime.utcnow)
+    imported_at = Column(DateTime, default=utc_now)
     organism_id = Column(Integer, ForeignKey("organisms.id", ondelete="SET NULL"))
 
 
@@ -62,7 +63,7 @@ class Organism(Base):
     species = Column(String)
     strain = Column(String)
     description = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class Gene(Base):
@@ -111,7 +112,7 @@ class DesignRun(Base):
     max_mismatches = Column(Integer)
     parameters_json = Column(Text)
     status = Column(String, default="completed")
-    started_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, default=utc_now)
     completed_at = Column(DateTime)
     report_csv_path = Column(String)
     report_xlsx_path = Column(String)
@@ -143,7 +144,7 @@ class Guide(Base):
     bgc_id = Column(String)
     bgc_context = Column(String)
     off_target_count = Column(Integer)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class ValidationResult(Base):
@@ -154,4 +155,4 @@ class ValidationResult(Base):
     guide_id = Column(String)
     result = Column(String)
     details = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
